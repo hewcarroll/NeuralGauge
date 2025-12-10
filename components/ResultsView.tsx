@@ -1,82 +1,104 @@
-import React from 'react';
-import { BenchmarkResult, AnalysisResult, ComponentType } from '../types';
-import { COMPONENT_ICONS } from '../constants';
+import React, { useState, useEffect } from 'react';
+import { BenchmarkResult, AnalysisResult, ComponentType, SavedSession } from '../types';
+import { COMPONENT_ICONS, GLOBAL_AVERAGES } from '../constants';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ComposedChart, Line, CartesianGrid, Legend } from 'recharts';
 import ReactMarkdown from 'react-markdown';
-import { RefreshCw, Cpu, Brain, Download, AlertTriangle, Save, Layers, BrainCircuit, Timer } from 'lucide-react';
+import { RefreshCw, Cpu, Brain, Download, AlertTriangle, Save, Layers, BrainCircuit, Timer, Check, X, ArrowUpRight, ArrowDownRight, Scale, Zap } from 'lucide-react';
 
 interface ResultsViewProps {
   results: BenchmarkResult[];
   analysis: AnalysisResult | null;
   onReset: () => void;
   loadingAnalysis: boolean;
+  onSave?: (name: string) => void;
 }
 
-const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, loadingAnalysis }) => {
-  
-  // Transform data for charts
+const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, loadingAnalysis, onSave }) => {
+  const [isSaving, setIsSaving] = useState(false);
+  const [sessionName, setSessionName] = useState('');
+  const [compareId, setCompareId] = useState<string>('none');
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
+
+  // Load sessions for comparison dropdown
+  useEffect(() => {
+    const sessions = localStorage.getItem('neuralGaugeSessions');
+    if (sessions) {
+      try {
+        setSavedSessions(JSON.parse(sessions));
+      } catch (e) { console.error(e); }
+    }
+  }, []);
+
+  // Determine comparison dataset
+  let comparisonData: Record<string, number> | null = null;
+  let comparisonLabel = 'Comparison';
+
+  if (compareId === 'avg') {
+    comparisonData = GLOBAL_AVERAGES;
+    comparisonLabel = 'Global Avg';
+  } else if (compareId !== 'none') {
+    const session = savedSessions.find(s => s.id === compareId);
+    if (session) {
+      comparisonLabel = session.name;
+      comparisonData = session.results.reduce((acc, curr) => ({
+        ...acc,
+        [curr.type]: curr.score
+      }), {});
+    }
+  }
+
+  // Transform data for charts with comparison
   const generalChartData = results.map(r => ({
     subject: r.type,
-    A: r.score,
+    current: r.score,
+    compare: comparisonData ? (comparisonData[r.type] || 0) : null,
     fullMark: 15000, 
   }));
 
   // Prepare specific data for VRAM chart if available
   const gpuMemResult = results.find(r => r.type === ComponentType.GPU_MEMORY);
-  let vramChartData = [];
+  let vramChartData: any[] = [];
   if (gpuMemResult && !gpuMemResult.error) {
     const internalBw = gpuMemResult.metrics.find(m => m.name === 'Internal Bandwidth')?.value || 0;
     const writeBw = gpuMemResult.metrics.find(m => m.name === 'Write Bandwidth')?.value || 0;
     const readBw = gpuMemResult.metrics.find(m => m.name === 'Read Bandwidth')?.value || 0;
     
-    // Legacy support for older metric name
+    // Legacy support for older metric name if needed, though we updated benchmark.ts
     const legacyBw = gpuMemResult.metrics.find(m => m.name === 'VRAM Bandwidth')?.value || 0;
     const finalInternalBw = internalBw || legacyBw;
 
-    const writeLatency = gpuMemResult.metrics.find(m => m.name === 'Write Latency')?.value || 0;
-    const readLatency = gpuMemResult.metrics.find(m => m.name === 'Read Latency')?.value || 0;
-    
     vramChartData = [
-      { name: 'Bandwidth', internal: finalInternalBw, write: writeBw, read: readBw },
-      { name: 'Latency', writeL: writeLatency, readL: readLatency }
-    ];
-  }
-
-  // Prepare specific data for CPU Cache chart
-  const cpuResult = results.find(r => r.type === ComponentType.CPU);
-  let cpuCacheData = [];
-  let cpuLatencyData = [];
-
-  if (cpuResult && !cpuResult.error) {
-    const seqRead = cpuResult.metrics.find(m => m.name === 'Seq. Read')?.value || 0;
-    const rndRead = cpuResult.metrics.find(m => m.name === 'Rnd. Read')?.value || 0;
-    cpuCacheData = [
-      { name: 'Seq. Read', speed: seqRead, type: 'Sequential' },
-      { name: 'Rnd. Read', speed: rndRead, type: 'Random' }
-    ];
-
-    const readLat = cpuResult.metrics.find(m => m.name === 'Mem Read Latency')?.value || 0;
-    const writeLat = cpuResult.metrics.find(m => m.name === 'Mem Write Latency')?.value || 0;
-    cpuLatencyData = [
-       { name: 'Read', latency: readLat },
-       { name: 'Write', latency: writeLat }
+      { name: 'Internal', value: finalInternalBw },
+      { name: 'Write', value: writeBw },
+      { name: 'Read', value: readBw },
     ];
   }
 
   // Prepare specific data for NPU chart
   const npuResult = results.find(r => r.type === ComponentType.NPU);
-  let npuChartData = [];
+  let npuChartData: any[] = [];
   if (npuResult && !npuResult.error) {
-    // Determine backend
     const backendMetric = npuResult.metrics.find(m => m.name === 'Backend');
     const backendName = backendMetric?.value === 1 ? 'WebGPU' : 'WebGL';
-    
-    // Get TFLOPS
     const perfMetric = npuResult.metrics.find(m => m.name.includes('Performance'));
     const tflops = perfMetric?.value || 0;
 
     npuChartData = [
       { name: backendName, tflops: tflops }
+    ];
+  }
+
+  // Prepare specific data for CPU Cache Latency chart
+  const cpuResult = results.find(r => r.type === ComponentType.CPU);
+  let cpuCacheData: any[] = [];
+  if (cpuResult && !cpuResult.error) {
+    const readLat = cpuResult.metrics.find(m => m.name === 'Read Latency')?.value || 0;
+    const writeLat = cpuResult.metrics.find(m => m.name === 'Write Latency')?.value || 0;
+    // We can interpret lower as better, but for bar chart visualization, raw ns is fine.
+    
+    cpuCacheData = [
+      { name: 'Random Read', value: readLat, fill: '#60a5fa' },
+      { name: 'Seq Write', value: writeLat, fill: '#34d399' }
     ];
   }
 
@@ -103,6 +125,18 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
     URL.revokeObjectURL(url);
   };
 
+  const handleSaveClick = () => {
+    setIsSaving(true);
+    setSessionName(`Benchmark ${new Date().toLocaleDateString()}`);
+  };
+
+  const confirmSave = () => {
+    if (onSave && sessionName.trim()) {
+      onSave(sessionName);
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="animate-fade-in w-full max-w-6xl mx-auto space-y-8 pb-20">
       
@@ -112,14 +146,48 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
           <h2 className="text-3xl font-bold text-white">Benchmark Report</h2>
           <p className="text-gray-400 mt-1">Generated {new Date().toLocaleTimeString()}</p>
         </div>
-        <div className="flex gap-2">
-          <button 
-            onClick={handleExport}
-            className="flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-sm transition-colors border border-primary/20"
-          >
-            <Save size={16} />
-            Export JSON
-          </button>
+        <div className="flex flex-wrap gap-2 items-center">
+          
+          {isSaving ? (
+             <div className="flex items-center gap-2 bg-white/5 p-1 rounded-lg border border-white/10 animate-fade-in">
+               <input 
+                 type="text" 
+                 value={sessionName}
+                 onChange={(e) => setSessionName(e.target.value)}
+                 className="bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-primary w-40"
+                 placeholder="Session Name"
+                 autoFocus
+               />
+               <button onClick={confirmSave} className="p-1.5 bg-primary/20 text-primary hover:bg-primary/30 rounded">
+                 <Check size={16} />
+               </button>
+               <button onClick={() => setIsSaving(false)} className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded">
+                 <X size={16} />
+               </button>
+             </div>
+          ) : (
+            <>
+              {onSave && (
+                <button 
+                  onClick={handleSaveClick}
+                  className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-colors border border-white/10 text-gray-200"
+                >
+                  <Save size={16} />
+                  Save Session
+                </button>
+              )}
+              <button 
+                onClick={handleExport}
+                className="flex items-center gap-2 px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg text-sm transition-colors border border-primary/20"
+              >
+                <Download size={16} />
+                Export JSON
+              </button>
+            </>
+          )}
+
+          <div className="w-px h-8 bg-white/10 mx-2 hidden md:block"></div>
+
           <button 
             onClick={onReset}
             className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm transition-colors border border-white/10"
@@ -149,7 +217,15 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                     {res.error ? (
                       <AlertTriangle size={18} className="text-red-400" />
                     ) : (
-                      <span className="text-2xl font-mono font-bold text-primary">{res.score}</span>
+                      <div className="flex items-center gap-2">
+                        {comparisonData && (
+                          <span className={`text-xs font-bold flex items-center ${res.score >= (comparisonData[res.type] || 0) ? 'text-green-500' : 'text-red-500'}`}>
+                            {res.score >= (comparisonData[res.type] || 0) ? <ArrowUpRight size={14}/> : <ArrowDownRight size={14}/>}
+                            {Math.round(((res.score - (comparisonData[res.type] || 0)) / (comparisonData[res.type] || 1)) * 100)}%
+                          </span>
+                        )}
+                        <span className="text-2xl font-mono font-bold text-primary">{res.score}</span>
+                      </div>
                     )}
                   </div>
                   
@@ -172,9 +248,27 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
             </div>
           </div>
 
-          <div className="bg-surface border border-white/10 rounded-xl p-6 h-64">
-            <h4 className="text-xs font-bold text-gray-500 uppercase mb-4">Overall Performance</h4>
-             <ResponsiveContainer width="100%" height="80%">
+          <div className="bg-surface border border-white/10 rounded-xl p-6 h-80">
+            <div className="flex justify-between items-center mb-4">
+              <h4 className="text-xs font-bold text-gray-500 uppercase">Performance Compare</h4>
+              <div className="flex items-center gap-2">
+                <Scale size={14} className="text-gray-400"/>
+                <select 
+                  value={compareId} 
+                  onChange={(e) => setCompareId(e.target.value)}
+                  className="bg-black/30 text-xs text-gray-300 border border-white/10 rounded px-2 py-1 outline-none focus:border-primary"
+                >
+                  <option value="none">No Comparison</option>
+                  <option value="avg">Global Average</option>
+                  <optgroup label="Saved Sessions">
+                    {savedSessions.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+             <ResponsiveContainer width="100%" height="85%">
                 <BarChart data={generalChartData}>
                   <XAxis dataKey="subject" tick={{fill: '#666', fontSize: 10}} axisLine={false} tickLine={false} />
                   <Tooltip 
@@ -182,11 +276,11 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                     itemStyle={{ color: '#fff' }}
                     cursor={{fill: 'rgba(255,255,255,0.05)'}}
                   />
-                  <Bar dataKey="A" radius={[4, 4, 0, 0]}>
-                    {generalChartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={index % 2 === 0 ? '#00f2ea' : '#7000ff'} />
-                    ))}
-                  </Bar>
+                  <Legend verticalAlign="bottom" height={36} iconSize={10}/>
+                  <Bar dataKey="current" name="This Run" fill="#00f2ea" radius={[4, 4, 0, 0]} />
+                  {comparisonData && (
+                     <Bar dataKey="compare" name={comparisonLabel} fill="#4b5563" radius={[4, 4, 0, 0]} />
+                  )}
                 </BarChart>
               </ResponsiveContainer>
           </div>
@@ -239,110 +333,34 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                  {vramChartData.length > 0 && (
                   <div className="bg-surface border border-white/10 rounded-xl p-6">
                      <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                       <Layers size={16} className="text-orange-400" /> VRAM Performance
+                       <Layers size={16} className="text-orange-400" /> VRAM Bandwidth
                      </h4>
                      <div className="h-48">
                        <ResponsiveContainer width="100%" height="100%">
                          <BarChart 
                            layout="vertical"
-                           data={vramChartData.filter(d => d.name === 'Bandwidth')}
+                           data={vramChartData}
                          >
                            <CartesianGrid stroke="#333" strokeDasharray="3 3" horizontal={false} />
                            <XAxis type="number" tick={{fill: '#999', fontSize: 10}} axisLine={false} tickLine={false} unit=" GB/s" />
-                           <YAxis dataKey="name" type="category" hide width={10} />
+                           <YAxis dataKey="name" type="category" tick={{fill: '#fff', fontSize: 11}} axisLine={false} tickLine={false} width={80} />
                            <Tooltip 
                               contentStyle={{ backgroundColor: '#121212', borderColor: '#333' }}
                               itemStyle={{ color: '#fff' }}
                               cursor={{fill: 'rgba(255,255,255,0.05)'}}
                            />
-                           <Legend verticalAlign="bottom" height={36} iconSize={10}/>
-                           <Bar dataKey="internal" name="Internal (Copy)" fill="#f97316" radius={[0, 4, 4, 0]} barSize={12} />
-                           <Bar dataKey="write" name="Write (Upload)" fill="#22c55e" radius={[0, 4, 4, 0]} barSize={12} />
-                           <Bar dataKey="read" name="Read (Download)" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={12} />
+                           <Bar dataKey="value" fill="#f97316" radius={[0, 4, 4, 0]} barSize={20}>
+                              {vramChartData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={
+                                  entry.name === 'Internal' ? '#f97316' : 
+                                  entry.name === 'Write' ? '#22c55e' : '#3b82f6'
+                                } />
+                              ))}
+                           </Bar>
                          </BarChart>
                        </ResponsiveContainer>
                      </div>
                   </div>
-                 )}
-
-                 {/* VRAM Latency Chart if available */}
-                 {vramChartData.length > 0 && (
-                  <div className="bg-surface border border-white/10 rounded-xl p-6">
-                     <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                       <Download size={16} className="text-orange-400" /> VRAM Latency
-                     </h4>
-                     <div className="h-48">
-                       <ResponsiveContainer width="100%" height="100%">
-                         <ComposedChart data={vramChartData.filter(d => d.name === 'Latency')} layout="vertical">
-                           <CartesianGrid stroke="#333" strokeDasharray="3 3" horizontal={false} />
-                           <XAxis type="number" hide />
-                           <YAxis dataKey="name" type="category" hide />
-                           <Tooltip 
-                              contentStyle={{ backgroundColor: '#121212', borderColor: '#333' }}
-                              itemStyle={{ color: '#fff' }}
-                              cursor={{fill: 'rgba(255,255,255,0.05)'}}
-                           />
-                           <Legend verticalAlign="bottom" height={36} iconSize={10}/>
-                           <Bar dataKey="writeL" name="Write Latency" fill="#fb923c" barSize={20} radius={[4, 0, 0, 4]} />
-                           <Bar dataKey="readL" name="Read Latency" fill="#ef4444" barSize={20} radius={[0, 4, 4, 0]} />
-                         </ComposedChart>
-                       </ResponsiveContainer>
-                     </div>
-                  </div>
-                 )}
-
-                 {/* CPU Cache Throughput */}
-                 {cpuCacheData.length > 0 && (
-                   <div className="bg-surface border border-white/10 rounded-xl p-6">
-                      <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                        <Cpu size={16} className="text-blue-400" /> CPU Cache Throughput
-                      </h4>
-                      <div className="h-48">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={cpuCacheData}>
-                            <CartesianGrid stroke="#333" strokeDasharray="3 3" vertical={false} />
-                            <XAxis dataKey="name" tick={{fill: '#999', fontSize: 10}} axisLine={false} tickLine={false} />
-                            <YAxis tick={{fill: '#999', fontSize: 10}} axisLine={false} tickLine={false} unit=" MB/s" />
-                            <Tooltip 
-                               contentStyle={{ backgroundColor: '#121212', borderColor: '#333' }}
-                               itemStyle={{ color: '#fff' }}
-                               cursor={{fill: 'rgba(255,255,255,0.05)'}}
-                               formatter={(value: number) => [`${value} MB/s`, 'Throughput']}
-                            />
-                            <Bar dataKey="speed" name="MB/s" radius={[4, 4, 0, 0]} barSize={40}>
-                               {cpuCacheData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.type === 'Sequential' ? '#60a5fa' : '#3b82f6'} />
-                              ))}
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                   </div>
-                 )}
-
-                 {/* CPU Memory Latency Chart */}
-                 {cpuLatencyData.length > 0 && (
-                   <div className="bg-surface border border-white/10 rounded-xl p-6">
-                      <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                        <Timer size={16} className="text-blue-400" /> CPU Memory Latency
-                      </h4>
-                      <div className="h-48">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={cpuLatencyData}>
-                            <CartesianGrid stroke="#333" strokeDasharray="3 3" vertical={false} />
-                            <XAxis dataKey="name" tick={{fill: '#999', fontSize: 10}} axisLine={false} tickLine={false} />
-                            <YAxis tick={{fill: '#999', fontSize: 10}} axisLine={false} tickLine={false} unit=" ns" />
-                            <Tooltip 
-                               contentStyle={{ backgroundColor: '#121212', borderColor: '#333' }}
-                               itemStyle={{ color: '#fff' }}
-                               cursor={{fill: 'rgba(255,255,255,0.05)'}}
-                               formatter={(value: number) => [`${value} ns`, 'Latency']}
-                            />
-                            <Bar dataKey="latency" name="Nanoseconds" radius={[4, 4, 0, 0]} barSize={40} fill="#3b82f6" />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                   </div>
                  )}
 
                  {/* NPU Chart if available */}
@@ -370,6 +388,34 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                     </div>
                  )}
 
+                 {/* CPU Cache Latency Chart */}
+                 {cpuCacheData.length > 0 && (
+                    <div className="bg-surface border border-white/10 rounded-xl p-6">
+                      <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                        <Zap size={16} className="text-blue-400" /> Mem Latency (ns)
+                      </h4>
+                      <div className="h-48">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={cpuCacheData} layout="vertical">
+                            <CartesianGrid stroke="#333" strokeDasharray="3 3" horizontal={false} />
+                            <XAxis type="number" tick={{fill: '#999', fontSize: 10}} axisLine={false} tickLine={false} unit=" ns" />
+                            <YAxis dataKey="name" type="category" tick={{fill: '#fff', fontSize: 11}} axisLine={false} tickLine={false} width={80} />
+                            <Tooltip 
+                                contentStyle={{ backgroundColor: '#121212', borderColor: '#333' }}
+                                itemStyle={{ color: '#fff' }}
+                                cursor={{fill: 'rgba(255,255,255,0.05)'}}
+                                formatter={(value: number) => [`${value} ns`, 'Latency']}
+                            />
+                            <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={20}>
+                                {cpuCacheData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={entry.fill} />
+                                ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                 )}
                </div>
 
               {/* Detailed Markdown */}

@@ -1,3 +1,4 @@
+
 export enum ComponentType {
   CPU = 'CPU',
   GPU = 'GPU',
@@ -27,6 +28,14 @@ export interface AnalysisResult {
   markdown: string;
   aiReadinessScore: number; // 0-100
   recommendedModels: string[];
+}
+
+export interface SavedSession {
+  id: string;
+  name: string;
+  timestamp: number;
+  results: BenchmarkResult[];
+  analysis: AnalysisResult | null;
 }
 
 export interface BenchmarkConfig {

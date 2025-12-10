@@ -1,11 +1,13 @@
+
 import React, { useState, useEffect } from 'react';
-import { ComponentType, BenchmarkResult, AnalysisResult, BenchmarkConfig, ConfigPreset, DEFAULT_CONFIG } from './types';
+import { ComponentType, BenchmarkResult, AnalysisResult, BenchmarkConfig, ConfigPreset, DEFAULT_CONFIG, SavedSession } from './types';
 import { runBenchmark } from './services/benchmarks';
 import { analyzeResults } from './services/geminiService';
 import BenchmarkCard from './components/BenchmarkCard';
 import ResultsView from './components/ResultsView';
 import ConfigModal from './components/ConfigModal';
 import ProgressBar from './components/ProgressBar';
+import SessionHistory from './components/SessionHistory';
 import { Activity, Terminal } from 'lucide-react';
 
 enum AppState {
@@ -17,6 +19,7 @@ enum AppState {
 
 const CONFIG_STORAGE_KEY = 'neuralGaugeConfig';
 const PRESETS_STORAGE_KEY = 'neuralGaugePresets';
+const SESSIONS_STORAGE_KEY = 'neuralGaugeSessions';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
@@ -30,8 +33,9 @@ const App: React.FC = () => {
   const [selectedBenchmark, setSelectedBenchmark] = useState<ComponentType | null>(null);
   const [config, setConfig] = useState<BenchmarkConfig>(DEFAULT_CONFIG);
   const [presets, setPresets] = useState<ConfigPreset[]>([]);
+  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
 
-  // Load config & presets from local storage on mount
+  // Load config, presets & sessions from local storage on mount
   useEffect(() => {
     const savedConfig = localStorage.getItem(CONFIG_STORAGE_KEY);
     if (savedConfig) {
@@ -47,6 +51,12 @@ const App: React.FC = () => {
         setPresets(JSON.parse(savedPresets));
       } catch(e) { console.error(e); }
     }
+    const savedSessionsData = localStorage.getItem(SESSIONS_STORAGE_KEY);
+    if (savedSessionsData) {
+      try {
+        setSavedSessions(JSON.parse(savedSessionsData));
+      } catch(e) { console.error(e); }
+    }
   }, []);
 
   const savePreset = (name: string, cfg: BenchmarkConfig) => {
@@ -60,6 +70,32 @@ const App: React.FC = () => {
     const updated = presets.filter(p => p.id !== id);
     setPresets(updated);
     localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(updated));
+  };
+
+  // Session Management
+  const handleSaveSession = (name: string) => {
+    const newSession: SavedSession = {
+      id: Date.now().toString(),
+      name,
+      timestamp: Date.now(),
+      results,
+      analysis
+    };
+    const updated = [...savedSessions, newSession];
+    setSavedSessions(updated);
+    localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(updated));
+  };
+
+  const handleDeleteSession = (id: string) => {
+    const updated = savedSessions.filter(s => s.id !== id);
+    setSavedSessions(updated);
+    localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(updated));
+  };
+
+  const handleLoadSession = (session: SavedSession) => {
+    setResults(session.results);
+    setAnalysis(session.analysis);
+    setAppState(AppState.RESULTS);
   };
 
   const handleBenchmarkClick = (type: ComponentType) => {
@@ -210,6 +246,13 @@ const App: React.FC = () => {
                 disabled={false}
               />
             </div>
+
+            <SessionHistory 
+              sessions={savedSessions} 
+              onLoad={handleLoadSession}
+              onDelete={handleDeleteSession}
+            />
+
           </div>
         )}
 
@@ -235,6 +278,7 @@ const App: React.FC = () => {
             analysis={analysis}
             onReset={handleReset}
             loadingAnalysis={false}
+            onSave={handleSaveSession}
           />
         )}
 

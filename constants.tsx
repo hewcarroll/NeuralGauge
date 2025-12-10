@@ -20,6 +20,14 @@ export const COMPONENT_COLORS = {
   [ComponentType.FULL_SUITE]: "text-primary border-primary shadow-primary/20",
 };
 
+export const GLOBAL_AVERAGES = {
+  [ComponentType.CPU]: 8500,        // Mid-range Desktop CPU
+  [ComponentType.GPU]: 90000,       // Integrated/Mid GPU
+  [ComponentType.GPU_MEMORY]: 4000, // DDR4/DDR5 shared memory speeds
+  [ComponentType.NPU]: 6000,        // Software/WebGL fallback average
+  [ComponentType.RAM]: 5000,        // Standard DDR4
+};
+
 export const SHADERS = {
   GPU_COMPUTE: {
     vertex: `#version 300 es

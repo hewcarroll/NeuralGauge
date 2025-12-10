@@ -93,14 +93,18 @@ export const analyzeResults = async (results: BenchmarkResult[]): Promise<Analys
     console.error("Gemini Analysis Failed:", error);
     let msg = error.message || "Unknown Error";
     
-    if (msg.includes('400')) msg = "Invalid API Request (400). Please check data format.";
-    if (msg.includes('401')) msg = "Unauthorized (401). Invalid API Key.";
-    if (msg.includes('429')) msg = "Rate Limit Exceeded (429). You are sending too many requests.";
-    if (msg.includes('500')) msg = "Gemini Server Error (500). Google's servers are having trouble.";
-    if (msg.includes('503')) msg = "Service Unavailable (503). The model is temporarily overloaded.";
+    // More granular error mapping for common API issues
+    if (msg.includes('400')) msg = "Invalid API Request (400). Please check data format or prompt length.";
+    else if (msg.includes('401')) msg = "Unauthorized (401). Invalid or expired API Key.";
+    else if (msg.includes('403')) msg = "Forbidden (403). API Key does not have permission for this project.";
+    else if (msg.includes('404')) msg = "Not Found (404). The requested model was not found.";
+    else if (msg.includes('429')) msg = "Rate Limit Exceeded (429). The API is being called too frequently.";
+    else if (msg.includes('500')) msg = "Internal Server Error (500). Google's servers encountered an error.";
+    else if (msg.includes('503')) msg = "Service Unavailable (503). The service is temporarily overloaded.";
+    else if (msg.includes('fetch failed')) msg = "Network Error. Failed to connect to Gemini API.";
 
     return {
-      markdown: `### Analysis Unavailable\n\nAn error occurred while communicating with the analysis engine:\n\n**${msg}**`,
+      markdown: `### Analysis Unavailable\n\nAn error occurred while communicating with the analysis engine:\n\n**${msg}**\n\n*Check the console for technical details.*`,
       aiReadinessScore: 0,
       recommendedModels: ["Analysis Unavailable"]
     };
