@@ -58,12 +58,15 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
   // Prepare specific data for VRAM chart if available
   const gpuMemResult = results.find(r => r.type === ComponentType.GPU_MEMORY);
   let vramChartData: any[] = [];
+  let vramLatencyData: any[] = [];
+  
   if (gpuMemResult && !gpuMemResult.error) {
     const internalBw = gpuMemResult.metrics.find(m => m.name === 'Internal Bandwidth')?.value || 0;
     const writeBw = gpuMemResult.metrics.find(m => m.name === 'Write Bandwidth')?.value || 0;
     const readBw = gpuMemResult.metrics.find(m => m.name === 'Read Bandwidth')?.value || 0;
-    
-    // Legacy support for older metric name if needed, though we updated benchmark.ts
+    const writeLat = gpuMemResult.metrics.find(m => m.name === 'Write Latency')?.value || 0;
+    const readLat = gpuMemResult.metrics.find(m => m.name === 'Read Latency')?.value || 0;
+
     const legacyBw = gpuMemResult.metrics.find(m => m.name === 'VRAM Bandwidth')?.value || 0;
     const finalInternalBw = internalBw || legacyBw;
 
@@ -71,6 +74,11 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
       { name: 'Internal', value: finalInternalBw },
       { name: 'Write', value: writeBw },
       { name: 'Read', value: readBw },
+    ];
+    
+    vramLatencyData = [
+       { name: 'Write', value: writeLat, fill: '#ef4444' }, // Red
+       { name: 'Read', value: readLat, fill: '#3b82f6' }    // Blue
     ];
   }
 
@@ -92,13 +100,14 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
   const cpuResult = results.find(r => r.type === ComponentType.CPU);
   let cpuCacheData: any[] = [];
   if (cpuResult && !cpuResult.error) {
-    const readLat = cpuResult.metrics.find(m => m.name === 'Read Latency')?.value || 0;
-    const writeLat = cpuResult.metrics.find(m => m.name === 'Write Latency')?.value || 0;
-    // We can interpret lower as better, but for bar chart visualization, raw ns is fine.
+    const l1 = cpuResult.metrics.find(m => m.name === 'L1 R-Lat')?.value || 0;
+    const l2 = cpuResult.metrics.find(m => m.name === 'L2 R-Lat')?.value || 0;
+    const l3 = cpuResult.metrics.find(m => m.name === 'L3 R-Lat')?.value || 0;
     
     cpuCacheData = [
-      { name: 'Random Read', value: readLat, fill: '#60a5fa' },
-      { name: 'Seq Write', value: writeLat, fill: '#34d399' }
+      { name: 'L1 Cache', value: l1, fill: '#60a5fa' }, // Blue
+      { name: 'L2 Cache', value: l2, fill: '#a78bfa' }, // Purple
+      { name: 'L3/RAM', value: l3, fill: '#f472b6' }    // Pink
     ];
   }
 
@@ -363,6 +372,37 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                   </div>
                  )}
 
+                 {/* GPU Latency Chart */}
+                 {vramLatencyData.length > 0 && (
+                  <div className="bg-surface border border-white/10 rounded-xl p-6">
+                     <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                       <Timer size={16} className="text-red-400" /> VRAM Latency
+                     </h4>
+                     <div className="h-48">
+                       <ResponsiveContainer width="100%" height="100%">
+                         <BarChart 
+                           layout="vertical"
+                           data={vramLatencyData}
+                         >
+                           <CartesianGrid stroke="#333" strokeDasharray="3 3" horizontal={false} />
+                           <XAxis type="number" tick={{fill: '#999', fontSize: 10}} axisLine={false} tickLine={false} unit=" ms" />
+                           <YAxis dataKey="name" type="category" tick={{fill: '#fff', fontSize: 11}} axisLine={false} tickLine={false} width={80} />
+                           <Tooltip 
+                              contentStyle={{ backgroundColor: '#121212', borderColor: '#333' }}
+                              itemStyle={{ color: '#fff' }}
+                              cursor={{fill: 'rgba(255,255,255,0.05)'}}
+                           />
+                           <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={20}>
+                              {vramLatencyData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.fill} />
+                              ))}
+                           </Bar>
+                         </BarChart>
+                       </ResponsiveContainer>
+                     </div>
+                  </div>
+                 )}
+
                  {/* NPU Chart if available */}
                  {npuChartData.length > 0 && (
                     <div className="bg-surface border border-white/10 rounded-xl p-6">
@@ -392,7 +432,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                  {cpuCacheData.length > 0 && (
                     <div className="bg-surface border border-white/10 rounded-xl p-6">
                       <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                        <Zap size={16} className="text-blue-400" /> Mem Latency (ns)
+                        <Zap size={16} className="text-blue-400" /> CPU Cache Latency
                       </h4>
                       <div className="h-48">
                         <ResponsiveContainer width="100%" height="100%">
@@ -404,7 +444,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                                 contentStyle={{ backgroundColor: '#121212', borderColor: '#333' }}
                                 itemStyle={{ color: '#fff' }}
                                 cursor={{fill: 'rgba(255,255,255,0.05)'}}
-                                formatter={(value: number) => [`${value} ns`, 'Latency']}
+                                formatter={(value: number) => [`${value} ns`, 'Random Latency']}
                             />
                             <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={20}>
                                 {cpuCacheData.map((entry, index) => (

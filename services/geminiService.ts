@@ -102,6 +102,7 @@ export const analyzeResults = async (results: BenchmarkResult[]): Promise<Analys
     else if (msg.includes('500')) msg = "Internal Server Error (500). Google's servers encountered an error.";
     else if (msg.includes('503')) msg = "Service Unavailable (503). The service is temporarily overloaded.";
     else if (msg.includes('fetch failed')) msg = "Network Error. Failed to connect to Gemini API.";
+    else if (msg.includes('finishReason')) msg = `AI Safety Block: ${msg}`;
 
     return {
       markdown: `### Analysis Unavailable\n\nAn error occurred while communicating with the analysis engine:\n\n**${msg}**\n\n*Check the console for technical details.*`,

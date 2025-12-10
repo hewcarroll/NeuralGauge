@@ -40,17 +40,17 @@ const BenchmarkCard: React.FC<BenchmarkCardProps> = ({ type, label, description,
           {COMPONENT_ICONS[type]}
         </div>
         {shaderSource && (
-          <div className="relative">
-             <button 
-               onClick={(e) => { e.stopPropagation(); setShowShader(!showShader); }}
-               className="text-gray-500 hover:text-primary transition-colors p-1"
-             >
+          <div 
+            className="relative"
+            onMouseEnter={() => setShowShader(true)}
+            onMouseLeave={() => setShowShader(false)}
+          >
+             <div className="text-gray-500 hover:text-primary transition-colors p-1 cursor-help">
                <Info size={18} />
-             </button>
+             </div>
              {showShader && (
                 <div 
                   className="absolute right-0 top-8 w-64 md:w-80 bg-black/95 border border-white/20 rounded-lg p-3 z-50 shadow-2xl text-xs font-mono text-gray-300 overflow-hidden"
-                  onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center gap-2 mb-2 text-primary border-b border-white/10 pb-1">
                     <Code size={12} /> Shader Source

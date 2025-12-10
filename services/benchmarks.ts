@@ -17,6 +17,13 @@ declare global {
 declare const GPUShaderStage: any;
 declare const GPUBufferUsage: any;
 
+// Global state to track last executed context for error reporting
+let lastDebugState = {
+  shaderSource: '',
+  context: '',
+  renderer: ''
+};
+
 // Helper to check WebGL errors with more granularity
 const checkWebGLError = (gl: WebGL2RenderingContext, context: string) => {
   const error = gl.getError();
@@ -33,6 +40,7 @@ const checkWebGLError = (gl: WebGL2RenderingContext, context: string) => {
     // Attempt to get renderer info for context
     const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
     const renderer = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : 'Unknown Renderer';
+    lastDebugState.renderer = renderer;
     
     throw new Error(`WebGL Error in ${context}: ${errorMap[error] || error} (0x${error.toString(16)}). Hardware: ${renderer}`);
   }
@@ -43,6 +51,7 @@ const safeRun = async <T>(
   type: ComponentType, 
   fn: () => Promise<BenchmarkResult>
 ): Promise<BenchmarkResult> => {
+  lastDebugState = { shaderSource: '', context: '', renderer: '' }; // Reset
   try {
     return await fn();
   } catch (error: any) {
@@ -57,13 +66,17 @@ const safeRun = async <T>(
     else if (msg.includes('gpu') || msg.includes('adapter') || msg.includes('device')) errorType = 'WebGPUError';
     else if (msg.includes('timeout') || msg.includes('lost')) errorType = 'DeviceLostError';
 
+    const debugInfo = lastDebugState.shaderSource 
+      ? ` [Last Shader: ${lastDebugState.shaderSource.slice(0, 50)}...]` 
+      : '';
+
     return {
       type,
       score: 0,
       timestamp: Date.now(),
       durationMs: 0,
       metrics: [],
-      error: `${errorType}: ${error.message}`
+      error: `${errorType}: ${error.message}${debugInfo}`
     };
   }
 };
@@ -182,9 +195,7 @@ const runCpuBenchmark = async (config: BenchmarkConfig): Promise<BenchmarkResult
     }
 
     const N = matrixSize;
-    // We break the loop to measure "thread blockage" (Load proxy)
     const threadCheckStart = performance.now();
-    let threadCheckEnd = 0;
     
     for (let i = 0; i < N; i++) {
       for (let j = 0; j < N; j++) {
@@ -195,23 +206,18 @@ const runCpuBenchmark = async (config: BenchmarkConfig): Promise<BenchmarkResult
         C[i * N + j] = sum;
       }
     }
-    threadCheckEnd = performance.now();
+    const threadCheckEnd = performance.now();
     const matDuration = (threadCheckEnd - mathStart) / 1000;
     
-    // Calculate "Stability" / Load Proxy
-    // If the system is under heavy load, performance.now() deltas variance increases.
-    // Ideally we would use CPU usage API but it doesn't exist.
-    // We simulate "Thread Congestion" by measuring the execution time consistency of small chunks.
+    // Stability Check
     const chunks = 10;
     const chunkTimes = [];
     for(let c=0; c<chunks; c++) {
         const t0 = performance.now();
-        // Small busy wait
         let v = 0;
         for(let z=0; z<100000; z++) v+=z;
         chunkTimes.push(performance.now() - t0);
     }
-    // Calculate Variance
     const mean = chunkTimes.reduce((a,b) => a+b) / chunks;
     const variance = chunkTimes.reduce((a,b) => a + Math.pow(b - mean, 2), 0) / chunks;
     const stabilityScore = 100 - (Math.min(variance * 100, 100));
@@ -228,47 +234,52 @@ const runCpuBenchmark = async (config: BenchmarkConfig): Promise<BenchmarkResult
       val = (val + i) ^ (i & 0xFFFFFF); 
     }
     const latEnd = performance.now();
-    if (val === -1) console.log(val); 
+    if (val === -1) console.log(val); // Prevent dead code elimination
     
     const latDurationMs = latEnd - latStart;
-    const nsPerOp = (latDurationMs * 1_000_000) / latencyIterations; // ms -> ns
 
-    // Part 3: Memory Bandwidth & Latency
-    const largeSize = 1024 * 1024 * 16; // 16M ints = 64MB
-    const memoryBuffer = new Int32Array(largeSize);
-    for(let i=0; i<largeSize; i++) memoryBuffer[i] = i;
-
-    // 3a. Sequential Read Bandwidth
-    const seqStart = performance.now();
-    let seqSum = 0;
-    for(let i=0; i<largeSize; i++) {
-      seqSum += memoryBuffer[i];
-    }
-    const seqEnd = performance.now();
-    const seqDuration = seqEnd - seqStart;
-    const seqBandwidth = ((largeSize * 4) / 1024 / 1024) / (seqDuration / 1000); // MB/s
-
-    // 3b. Random Read Bandwidth & Latency (Pointer Chasing simulation via stride)
-    for(let i=0; i<largeSize; i++) {
-        memoryBuffer[i] = (i + 12345) % largeSize;
-    }
+    // Part 3: Memory Latency Hierarchy (L1, L2, L3 Simulation)
+    // We test different array sizes to hit different cache levels
+    const cacheTests = [
+      { name: 'L1', size: 32 * 1024 }, // ~32KB
+      { name: 'L2', size: 512 * 1024 }, // ~512KB
+      { name: 'L3', size: 8 * 1024 * 1024 } // ~8MB
+    ];
     
-    const latMemIterations = 1000000;
-    let idx = 0;
-    const memLatStart = performance.now();
-    for(let i=0; i<latMemIterations; i++) {
-        idx = memoryBuffer[idx];
-    }
-    const memLatEnd = performance.now();
-    const memReadLatencyNs = ((memLatEnd - memLatStart) * 1_000_000) / latMemIterations;
+    const metrics: any[] = [
+      { name: 'FP32 Speed', value: parseFloat(gflops.toFixed(2)), unit: 'GFLOPS', description: 'Single-core floating point operations' },
+      { name: 'Stability', value: parseFloat(stabilityScore.toFixed(1)), unit: '%', description: 'Thread execution consistency' },
+    ];
 
-    const writeStart = performance.now();
-    for(let i=0; i<largeSize; i++) {
-        memoryBuffer[i] = i;
+    for (const test of cacheTests) {
+      const buffer = new Int32Array(test.size / 4);
+      // Fill pointer chase chain
+      // Random permutation for random access
+      for (let i = 0; i < buffer.length; i++) buffer[i] = i;
+      // Shuffle for random access
+      for (let i = buffer.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [buffer[i], buffer[j]] = [buffer[j], buffer[i]];
+      }
+
+      // Measure Random Read Latency
+      const steps = 1000000;
+      let p = 0;
+      const tStart = performance.now();
+      for (let k = 0; k < steps; k++) {
+        p = buffer[p]; 
+      }
+      const tEnd = performance.now();
+      if (p === -1) console.log(p); // Prevent optimization
+      
+      const latencyNs = ((tEnd - tStart) * 1e6) / steps;
+      metrics.push({
+        name: `${test.name} R-Lat`,
+        value: parseFloat(latencyNs.toFixed(2)),
+        unit: 'ns',
+        description: `Random Read Latency for ${test.name} block`
+      });
     }
-    const writeEnd = performance.now();
-    const writeDuration = writeEnd - writeStart;
-    const memWriteLatencyNs = (writeDuration * 1_000_000) / largeSize;
 
     const score = Math.floor(gflops * 1000);
 
@@ -278,11 +289,7 @@ const runCpuBenchmark = async (config: BenchmarkConfig): Promise<BenchmarkResult
       timestamp: Date.now(),
       durationMs: performance.now() - startTime,
       metrics: [
-        { name: 'FP32 Speed', value: parseFloat(gflops.toFixed(2)), unit: 'GFLOPS', description: 'Single-core floating point operations' },
-        { name: 'Stability', value: parseFloat(stabilityScore.toFixed(1)), unit: '%', description: 'Thread execution consistency (Load proxy)' },
-        { name: 'Seq. Read', value: parseFloat(seqBandwidth.toFixed(2)), unit: 'MB/s', description: 'Linear memory access' },
-        { name: 'Read Latency', value: parseFloat(memReadLatencyNs.toFixed(2)), unit: 'ns', description: 'Random pointer chase latency' },
-        { name: 'Write Latency', value: parseFloat(memWriteLatencyNs.toFixed(2)), unit: 'ns', description: 'Sequential store latency' },
+        ...metrics,
         { name: 'Matrix Size', value: matrixSize, unit: 'N', description: 'NxN Matrix Multiplication' }
       ]
     };
@@ -303,6 +310,7 @@ const runGpuBenchmark = async (config: BenchmarkConfig): Promise<BenchmarkResult
 
     const vsSource = SHADERS.GPU_COMPUTE.vertex;
     const fsSource = SHADERS.GPU_COMPUTE.fragment(config.gpuIterations);
+    lastDebugState.shaderSource = fsSource;
 
     const createShader = (gl: WebGL2RenderingContext, type: number, source: string) => {
       const shader = gl.createShader(type);
@@ -384,6 +392,7 @@ const runGpuMemoryBenchmark = async (config: BenchmarkConfig): Promise<Benchmark
 
     const vsSource = SHADERS.GPU_MEMORY.vertex;
     const fsSource = SHADERS.GPU_MEMORY.fragment;
+    lastDebugState.shaderSource = fsSource;
 
     const createShader = (gl: WebGL2RenderingContext, type: number, source: string) => {
       const shader = gl.createShader(type);
@@ -465,7 +474,8 @@ const runGpuMemoryBenchmark = async (config: BenchmarkConfig): Promise<Benchmark
     const rwIterations = 5;
     const uploadData = new Uint8Array(size * size * 4);
     
-    // Create PBO
+    // Check PBO Support
+    // WebGL2 supports PIXEL_UNPACK_BUFFER by default
     const pbo = gl.createBuffer();
     gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, pbo);
     gl.bufferData(gl.PIXEL_UNPACK_BUFFER, uploadData.byteLength, gl.STREAM_DRAW);
@@ -497,10 +507,6 @@ const runGpuMemoryBenchmark = async (config: BenchmarkConfig): Promise<Benchmark
     for(let i=0; i<rwIterations; i++) {
         // Asynchronous readback to PBO
         gl.readPixels(0, 0, size, size, gl.RGBA, gl.UNSIGNED_BYTE, 0);
-        // We simulate accessing the data by mapping/unmapping or just waiting
-        // In WebGL2 we can use getBufferSubData but it's synchronous.
-        // For a benchmark we essentially want to measure the transfer time.
-        // A naive readPixels to a typed array is actually a good measure of "Blocking Read Bandwidth"
     }
     // Sync point
     gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, downloadData);
@@ -680,17 +686,12 @@ const runNpuBenchmark = async (config: BenchmarkConfig): Promise<BenchmarkResult
     const ext = gl.getExtension("EXT_color_buffer_float");
     if (!ext) throw new Error("Floating point textures (EXT_color_buffer_float) not supported");
     
-    // Shader to perform heavy dot product to mimic matrix row multiplication
-    // Optimized for tensor operation simulation:
-    // 1. Uses texelFetch for precise texel access from NxN textures
-    // 2. Uses gl_FragCoord to simulate true 2D matrix multiplication (every pixel computes a unique dot product)
-    // 3. Unrolled loop to minimize branching overhead and maximize ALU saturation
+    // Improved NPU Shader: Uses dot products for better packing and simulation
     const vsSource = `#version 300 es
        in vec4 position;
        void main() { gl_Position = position; }
      `;
      
-     // Highly optimized dot product shader loop
      const fsSource = `#version 300 es
        precision highp float;
        uniform sampler2D u_texA;
@@ -701,29 +702,28 @@ const runNpuBenchmark = async (config: BenchmarkConfig): Promise<BenchmarkResult
          float sum = 0.0;
          int size = ${matrixSize};
          
-         // Unroll factor 16 for maximum instruction density per loop
-         for(int k=0; k<size; k+=16) {
-           sum += texelFetch(u_texA, ivec2(k, pos.y), 0).r * texelFetch(u_texB, ivec2(k, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+1, pos.y), 0).r * texelFetch(u_texB, ivec2(k+1, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+2, pos.y), 0).r * texelFetch(u_texB, ivec2(k+2, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+3, pos.y), 0).r * texelFetch(u_texB, ivec2(k+3, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+4, pos.y), 0).r * texelFetch(u_texB, ivec2(k+4, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+5, pos.y), 0).r * texelFetch(u_texB, ivec2(k+5, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+6, pos.y), 0).r * texelFetch(u_texB, ivec2(k+6, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+7, pos.y), 0).r * texelFetch(u_texB, ivec2(k+7, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+8, pos.y), 0).r * texelFetch(u_texB, ivec2(k+8, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+9, pos.y), 0).r * texelFetch(u_texB, ivec2(k+9, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+10, pos.y), 0).r * texelFetch(u_texB, ivec2(k+10, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+11, pos.y), 0).r * texelFetch(u_texB, ivec2(k+11, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+12, pos.y), 0).r * texelFetch(u_texB, ivec2(k+12, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+13, pos.y), 0).r * texelFetch(u_texB, ivec2(k+13, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+14, pos.y), 0).r * texelFetch(u_texB, ivec2(k+14, pos.x), 0).r;
-           sum += texelFetch(u_texA, ivec2(k+15, pos.y), 0).r * texelFetch(u_texB, ivec2(k+15, pos.x), 0).r;
+         // Using dot() to allow vector instructions if the compiler can pack fetches
+         // Optimized unrolling with vector accumulation
+         for(int k=0; k<size; k+=4) {
+             vec4 a = vec4(
+                texelFetch(u_texA, ivec2(k, pos.y), 0).r,
+                texelFetch(u_texA, ivec2(k+1, pos.y), 0).r,
+                texelFetch(u_texA, ivec2(k+2, pos.y), 0).r,
+                texelFetch(u_texA, ivec2(k+3, pos.y), 0).r
+             );
+             vec4 b = vec4(
+                texelFetch(u_texB, ivec2(k, pos.x), 0).r,
+                texelFetch(u_texB, ivec2(k+1, pos.x), 0).r,
+                texelFetch(u_texB, ivec2(k+2, pos.x), 0).r,
+                texelFetch(u_texB, ivec2(k+3, pos.x), 0).r
+             );
+             sum += dot(a, b);
          }
          
          outColor = vec4(sum, 0.0, 0.0, 1.0);
        }
      `;
+     lastDebugState.shaderSource = fsSource;
      
      const createShader = (gl: WebGL2RenderingContext, type: number, src: string) => {
         const s = gl.createShader(type);
