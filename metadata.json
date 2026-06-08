@@ -1,5 +1,5 @@
 {
-  "name": "NeuralGauge - AI Hardware Benchmark",
-  "description": "A browser-based benchmarking suite designed to evaluate your hardware's capability for AI workloads using WebGL and Web Workers, with Gemini-powered analysis.",
-  "requestFramePermissions": []
+  "name": "NeuralGauge",
+  "description": "A desktop benchmarking suite that evaluates your hardware's capability for AI workloads using native Rust benchmarks, with Gemini-powered analysis.",
+  "homepage": ""
 }
