@@ -2188,6 +2188,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "neuralgauge"
+version = "1.0.0"
+dependencies = [
+ "rayon",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-shell",
+ "tauri-plugin-store",
+ "tokio",
+ "wgpu",
+]
+
+[[package]]
 name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4528,22 +4544,6 @@ dependencies = [
  "js-sys",
  "serde_core",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "neuralgauge"
-version = "1.0.0"
-dependencies = [
- "rayon",
- "serde",
- "serde_json",
- "sysinfo",
- "tauri",
- "tauri-build",
- "tauri-plugin-shell",
- "tauri-plugin-store",
- "tokio",
- "wgpu",
 ]
 
 [[package]]

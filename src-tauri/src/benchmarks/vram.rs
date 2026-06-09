@@ -3,6 +3,9 @@ use super::{VramConfig, BenchmarkResultPayload, BenchmarkMetric, calibrate};
 
 const WARMUP: usize = 2;
 const RUNS: usize = 5;
+const MIN_RUNS: usize = 5;
+const MAX_RUNS: usize = 100_000;
+const TARGET_SECS: f64 = 2.0;
 
 // Calibration anchors: (GB/s internal bandwidth, score)
 const VRAM_ANCHORS: &[(f64, f64)] = &[
@@ -131,8 +134,10 @@ pub async fn run(config: VramConfig) -> Result<BenchmarkResultPayload, String> {
     let dispatch_count = ((element_count + 255) / 256) as u32;
 
     let mut internal_durations: Vec<f64> = Vec::new();
+    let internal_start = Instant::now();
+    let mut run_idx = 0usize;
 
-    for run_idx in 0..(WARMUP + RUNS) {
+    loop {
         let mut encoder = device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_compute_pass(&Default::default());
@@ -147,6 +152,12 @@ pub async fn run(config: VramConfig) -> Result<BenchmarkResultPayload, String> {
 
         if run_idx >= WARMUP {
             internal_durations.push(elapsed);
+        }
+        run_idx += 1;
+
+        let done = internal_durations.len() >= MIN_RUNS && internal_start.elapsed().as_secs_f64() >= TARGET_SECS;
+        if done || internal_durations.len() >= MAX_RUNS {
+            break;
         }
     }
 
@@ -263,7 +274,7 @@ pub async fn run(config: VramConfig) -> Result<BenchmarkResultPayload, String> {
                 description: "Test buffer size".to_string(),
             },
         ],
-        run_count: RUNS,
+        run_count: internal_durations.len(),
         warmup_count: WARMUP,
         median_raw: round2(internal_gbps),
         variance: round2(std_dev),

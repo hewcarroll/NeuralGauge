@@ -1,30 +1,31 @@
 use std::time::Instant;
 use rayon::prelude::*;
-use super::{CpuConfig, BenchmarkResultPayload, BenchmarkMetric, warmup_and_measure, calibrate};
+use super::{CpuConfig, BenchmarkResultPayload, BenchmarkMetric, measure_timed, calibrate};
 
-const WARMUP: usize = 2;
-const RUNS: usize = 5;
+const WARMUP: usize = 3;
+const MIN_RUNS: usize = 3;
+const MAX_RUNS: usize = 100_000;
+// Per-test wall-clock budget. The CPU battery runs six compute tests, so the
+// whole thing lands around ~6s + cache probing.
+const TARGET_SECS: f64 = 1.0;
 
-// Calibration anchors: (GFLOPS, score)
-// Single-core approximate GFLOPS for reference CPUs
+// Calibration anchors: (single-core FP32 GFLOPS, score). The score stays pinned
+// to single-core FP32 so it remains comparable across runs and app versions.
 const CPU_ANCHORS: &[(f64, f64)] = &[
-    (15.0,   1000.0),   // i3-12100 class
-    (30.0,   3000.0),   // i5-12400 class
+    (15.0,   1000.0),   // i3-12100 / Ryzen 3 class
+    (30.0,   3000.0),   // i5-12400 / Ryzen 5 class
     (50.0,   5000.0),   // i7-12700K class
     (70.0,   7500.0),   // i9-13900K class
     (100.0, 10000.0),   // i9-14900KS class
 ];
 
-fn matmul_single_core(n: usize) -> f64 {
-    let mut a = vec![0.0f32; n * n];
-    let mut b = vec![0.0f32; n * n];
+// ---------------------------------------------------------------------------
+// Single-core GEMM kernels (allocation happens before the timed region)
+// ---------------------------------------------------------------------------
+fn matmul_f32_single(n: usize) -> f64 {
+    let a: Vec<f32> = (0..n * n).map(|i| (i as f32 * 0.001) % 1.0).collect();
+    let b: Vec<f32> = (0..n * n).map(|i| ((i + 7) as f32 * 0.0013) % 1.0).collect();
     let mut c = vec![0.0f32; n * n];
-
-    // Initialize
-    for i in 0..a.len() {
-        a[i] = (i as f32 * 0.001) % 1.0;
-        b[i] = ((i + 7) as f32 * 0.0013) % 1.0;
-    }
 
     let start = Instant::now();
     for i in 0..n {
@@ -36,67 +37,148 @@ fn matmul_single_core(n: usize) -> f64 {
         }
     }
     let elapsed = start.elapsed().as_secs_f64();
-
-    // Prevent dead-code elimination
     std::hint::black_box(&c);
-
-    let ops = 2.0 * (n as f64).powi(3);
-    ops / elapsed / 1e9 // GFLOPS
+    2.0 * (n as f64).powi(3) / elapsed / 1e9 // GFLOPS
 }
 
-fn matmul_multi_core(n: usize, thread_count: Option<usize>) -> f64 {
-    let mut c = vec![0.0f32; n * n];
-    let a: Vec<f32> = (0..n * n).map(|i| (i as f32 * 0.001) % 1.0).collect();
-    let b: Vec<f32> = (0..n * n).map(|i| ((i + 7) as f32 * 0.0013) % 1.0).collect();
+fn matmul_f64_single(n: usize) -> f64 {
+    let a: Vec<f64> = (0..n * n).map(|i| (i as f64 * 0.001) % 1.0).collect();
+    let b: Vec<f64> = (0..n * n).map(|i| ((i + 7) as f64 * 0.0013) % 1.0).collect();
+    let mut c = vec![0.0f64; n * n];
 
-    // Build thread pool if specific count requested
-    let pool = if let Some(tc) = thread_count {
-        Some(
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(tc)
-                .build()
-                .unwrap(),
-        )
-    } else {
-        None
-    };
+    let start = Instant::now();
+    for i in 0..n {
+        for k in 0..n {
+            let a_ik = a[i * n + k];
+            for j in 0..n {
+                c[i * n + j] += a_ik * b[k * n + j];
+            }
+        }
+    }
+    let elapsed = start.elapsed().as_secs_f64();
+    std::hint::black_box(&c);
+    2.0 * (n as f64).powi(3) / elapsed / 1e9 // GFLOPS
+}
 
-    let mut compute = || {
-        let start = Instant::now();
-        c.par_chunks_mut(n)
-            .enumerate()
-            .for_each(|(i, row)| {
-                for k in 0..n {
-                    let a_ik = a[i * n + k];
-                    for j in 0..n {
-                        row[j] += a_ik * b[k * n + j];
-                    }
+fn matmul_i32_single(n: usize) -> f64 {
+    let a: Vec<i32> = (0..n * n).map(|i| (i as i32 % 7) + 1).collect();
+    let b: Vec<i32> = (0..n * n).map(|i| (i as i32 % 13) + 1).collect();
+    let mut c = vec![0i32; n * n];
+
+    let start = Instant::now();
+    for i in 0..n {
+        for k in 0..n {
+            let a_ik = a[i * n + k];
+            for j in 0..n {
+                c[i * n + j] = c[i * n + j].wrapping_add(a_ik.wrapping_mul(b[k * n + j]));
+            }
+        }
+    }
+    let elapsed = start.elapsed().as_secs_f64();
+    std::hint::black_box(&c);
+    2.0 * (n as f64).powi(3) / elapsed / 1e9 // GIOPS (2 int ops per MAC)
+}
+
+// ---------------------------------------------------------------------------
+// Multi-core GEMM kernels — aggregate throughput.
+// Each thread runs its OWN independent matmul (no shared operand), so the test
+// measures total compute the CPU can sustain and scales with core count,
+// instead of parallelizing one memory-bandwidth-bound matrix (which barely
+// scales for fast FP32). Returns aggregate GFLOPS/GIOPS across all tasks.
+// ---------------------------------------------------------------------------
+fn matmul_f32_multi(n: usize, tasks: usize) -> f64 {
+    let mut work: Vec<(Vec<f32>, Vec<f32>, Vec<f32>)> = (0..tasks)
+        .map(|_| {
+            let a: Vec<f32> = (0..n * n).map(|i| (i as f32 * 0.001) % 1.0).collect();
+            let b: Vec<f32> = (0..n * n).map(|i| ((i + 7) as f32 * 0.0013) % 1.0).collect();
+            (a, b, vec![0.0f32; n * n])
+        })
+        .collect();
+
+    let start = Instant::now();
+    work.par_iter_mut().for_each(|(a, b, c)| {
+        for i in 0..n {
+            for k in 0..n {
+                let a_ik = a[i * n + k];
+                for j in 0..n {
+                    c[i * n + j] += a_ik * b[k * n + j];
                 }
-            });
-        start.elapsed().as_secs_f64()
-    };
-
-    let elapsed = if let Some(ref pool) = pool {
-        pool.install(compute)
-    } else {
-        compute()
-    };
-
-    std::hint::black_box(&c);
-
-    let ops = 2.0 * (n as f64).powi(3);
-    ops / elapsed / 1e9 // GFLOPS
+            }
+        }
+    });
+    let elapsed = start.elapsed().as_secs_f64();
+    std::hint::black_box(&work[0].2);
+    (tasks as f64) * 2.0 * (n as f64).powi(3) / elapsed / 1e9
 }
 
+fn matmul_f64_multi(n: usize, tasks: usize) -> f64 {
+    let mut work: Vec<(Vec<f64>, Vec<f64>, Vec<f64>)> = (0..tasks)
+        .map(|_| {
+            let a: Vec<f64> = (0..n * n).map(|i| (i as f64 * 0.001) % 1.0).collect();
+            let b: Vec<f64> = (0..n * n).map(|i| ((i + 7) as f64 * 0.0013) % 1.0).collect();
+            (a, b, vec![0.0f64; n * n])
+        })
+        .collect();
+
+    let start = Instant::now();
+    work.par_iter_mut().for_each(|(a, b, c)| {
+        for i in 0..n {
+            for k in 0..n {
+                let a_ik = a[i * n + k];
+                for j in 0..n {
+                    c[i * n + j] += a_ik * b[k * n + j];
+                }
+            }
+        }
+    });
+    let elapsed = start.elapsed().as_secs_f64();
+    std::hint::black_box(&work[0].2);
+    (tasks as f64) * 2.0 * (n as f64).powi(3) / elapsed / 1e9
+}
+
+fn matmul_i32_multi(n: usize, tasks: usize) -> f64 {
+    let mut work: Vec<(Vec<i32>, Vec<i32>, Vec<i32>)> = (0..tasks)
+        .map(|_| {
+            let a: Vec<i32> = (0..n * n).map(|i| (i as i32 % 7) + 1).collect();
+            let b: Vec<i32> = (0..n * n).map(|i| (i as i32 % 13) + 1).collect();
+            (a, b, vec![0i32; n * n])
+        })
+        .collect();
+
+    let start = Instant::now();
+    work.par_iter_mut().for_each(|(a, b, c)| {
+        for i in 0..n {
+            for k in 0..n {
+                let a_ik = a[i * n + k];
+                for j in 0..n {
+                    c[i * n + j] = c[i * n + j].wrapping_add(a_ik.wrapping_mul(b[k * n + j]));
+                }
+            }
+        }
+    });
+    let elapsed = start.elapsed().as_secs_f64();
+    std::hint::black_box(&work[0].2);
+    (tasks as f64) * 2.0 * (n as f64).powi(3) / elapsed / 1e9
+}
+
+// Run a closure on a capped thread pool if one is configured, else the global pool.
+fn pooled<F: Fn() -> f64 + Send + Sync>(pool: &Option<rayon::ThreadPool>, f: F) -> f64 {
+    match pool {
+        Some(p) => p.install(|| f()),
+        None => f(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cache / memory random-access latency (pointer chase)
+// ---------------------------------------------------------------------------
 fn cache_latency_ns(buffer_size: usize) -> f64 {
     let count = buffer_size / std::mem::size_of::<usize>();
     if count < 2 {
         return 0.0;
     }
 
-    // Build pointer-chase chain (random permutation)
     let mut indices: Vec<usize> = (0..count).collect();
-    // Fisher-Yates shuffle with deterministic seed
     let mut seed: u64 = 0xDEADBEEF;
     for i in (1..count).rev() {
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -109,7 +191,6 @@ fn cache_latency_ns(buffer_size: usize) -> f64 {
         chain[i] = indices[(i + 1) % count];
     }
 
-    // Chase pointers
     let iterations = 1_000_000.min(count * 100);
     let mut idx = 0usize;
 
@@ -118,7 +199,6 @@ fn cache_latency_ns(buffer_size: usize) -> f64 {
         idx = chain[idx];
     }
     let elapsed = start.elapsed().as_nanos() as f64;
-
     std::hint::black_box(idx);
 
     elapsed / iterations as f64
@@ -127,73 +207,79 @@ fn cache_latency_ns(buffer_size: usize) -> f64 {
 pub fn run(config: CpuConfig) -> Result<BenchmarkResultPayload, String> {
     let n = config.matrix_size.unwrap_or(512);
 
-    // Single-core GFLOPS (warmup + median)
-    let single_stats = warmup_and_measure(|| matmul_single_core(n), WARMUP, RUNS);
+    // Task count for multi-core aggregate tests (default: all logical cores).
+    let tasks = config
+        .thread_count
+        .filter(|&t| t > 0)
+        .unwrap_or_else(|| std::thread::available_parallelism().map(|x| x.get()).unwrap_or(1));
 
-    // Multi-core GFLOPS
-    let multi_stats = warmup_and_measure(
-        || matmul_multi_core(n, config.thread_count),
-        WARMUP,
-        RUNS,
-    );
+    // Optional capped pool (honors a user-set thread count); None = global pool.
+    let pool = match config.thread_count {
+        Some(tc) if tc > 0 => Some(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(tc)
+                .build()
+                .map_err(|e| format!("Thread pool error: {e}"))?,
+        ),
+        _ => None,
+    };
 
-    // Cache latency tests
-    let l1_latency = cache_latency_ns(32 * 1024);        // 32 KB
-    let l2_latency = cache_latency_ns(256 * 1024);       // 256 KB
-    let l3_latency = cache_latency_ns(8 * 1024 * 1024);  // 8 MB
+    // Compute battery (each runs for a fixed time budget)
+    let fp32_single = measure_timed(|| matmul_f32_single(n), WARMUP, MIN_RUNS, MAX_RUNS, TARGET_SECS);
+    let fp32_multi = measure_timed(|| pooled(&pool, || matmul_f32_multi(n, tasks)), WARMUP, MIN_RUNS, MAX_RUNS, TARGET_SECS);
+    let fp64_single = measure_timed(|| matmul_f64_single(n), WARMUP, MIN_RUNS, MAX_RUNS, TARGET_SECS);
+    let fp64_multi = measure_timed(|| pooled(&pool, || matmul_f64_multi(n, tasks)), WARMUP, MIN_RUNS, MAX_RUNS, TARGET_SECS);
+    let int_single = measure_timed(|| matmul_i32_single(n), WARMUP, MIN_RUNS, MAX_RUNS, TARGET_SECS);
+    let int_multi = measure_timed(|| pooled(&pool, || matmul_i32_multi(n, tasks)), WARMUP, MIN_RUNS, MAX_RUNS, TARGET_SECS);
+
+    // Cache / memory latency hierarchy
+    let l1_latency = cache_latency_ns(32 * 1024); // 32 KB
+    let l2_latency = cache_latency_ns(256 * 1024); // 256 KB
+    let l3_latency = cache_latency_ns(8 * 1024 * 1024); // 8 MB
     let mem_latency = cache_latency_ns(64 * 1024 * 1024); // 64 MB
 
-    let score = calibrate(single_stats.median, CPU_ANCHORS);
-    let ci = single_stats.confidence_95();
+    let mt_scaling = if fp32_single.median > 0.0 {
+        fp32_multi.median / fp32_single.median
+    } else {
+        0.0
+    };
+
+    // Score stays pinned to single-core FP32 for comparability.
+    let score = calibrate(fp32_single.median, CPU_ANCHORS);
+    let ci = fp32_single.confidence_95();
 
     Ok(BenchmarkResultPayload {
         component_type: "CPU".to_string(),
         score,
         metrics: vec![
-            BenchmarkMetric {
-                name: "Single-Core FP32".to_string(),
-                value: round2(single_stats.median),
-                unit: "GFLOPS".to_string(),
-                description: "Single-threaded matrix multiply throughput".to_string(),
-            },
-            BenchmarkMetric {
-                name: "Multi-Core FP32".to_string(),
-                value: round2(multi_stats.median),
-                unit: "GFLOPS".to_string(),
-                description: "Multi-threaded matrix multiply throughput".to_string(),
-            },
-            BenchmarkMetric {
-                name: "L1 R-Lat".to_string(),
-                value: round2(l1_latency),
-                unit: "ns".to_string(),
-                description: "L1 cache random access latency".to_string(),
-            },
-            BenchmarkMetric {
-                name: "L2 R-Lat".to_string(),
-                value: round2(l2_latency),
-                unit: "ns".to_string(),
-                description: "L2 cache random access latency".to_string(),
-            },
-            BenchmarkMetric {
-                name: "L3 R-Lat".to_string(),
-                value: round2(l3_latency),
-                unit: "ns".to_string(),
-                description: "L3 cache random access latency".to_string(),
-            },
-            BenchmarkMetric {
-                name: "Memory R-Lat".to_string(),
-                value: round2(mem_latency),
-                unit: "ns".to_string(),
-                description: "Main memory random access latency".to_string(),
-            },
+            metric("FP32 Single-Core", round2(fp32_single.median), "GFLOPS", "Single-threaded FP32 matrix multiply"),
+            metric("FP32 Multi-Core", round2(fp32_multi.median), "GFLOPS", "Aggregate FP32 throughput across all cores"),
+            metric("FP64 Single-Core", round2(fp64_single.median), "GFLOPS", "Single-threaded FP64 matrix multiply"),
+            metric("FP64 Multi-Core", round2(fp64_multi.median), "GFLOPS", "Aggregate FP64 throughput across all cores"),
+            metric("INT32 Single-Core", round2(int_single.median), "GIOPS", "Single-threaded INT32 multiply-add"),
+            metric("INT32 Multi-Core", round2(int_multi.median), "GIOPS", "Aggregate INT32 throughput across all cores"),
+            metric("MT Scaling", round2(mt_scaling), "x", "Aggregate multi-core / single-core FP32 speedup"),
+            metric("L1 R-Lat", round2(l1_latency), "ns", "L1 cache random access latency"),
+            metric("L2 R-Lat", round2(l2_latency), "ns", "L2 cache random access latency"),
+            metric("L3 R-Lat", round2(l3_latency), "ns", "L3 cache random access latency"),
+            metric("Memory R-Lat", round2(mem_latency), "ns", "Main memory random access latency"),
         ],
-        run_count: RUNS,
+        run_count: fp32_single.values.len(),
         warmup_count: WARMUP,
-        median_raw: round2(single_stats.median),
-        variance: round2(single_stats.std_dev),
+        median_raw: round2(fp32_single.median),
+        variance: round2(fp32_single.std_dev),
         confidence_interval: [round2(ci[0]), round2(ci[1])],
         error: None,
     })
+}
+
+fn metric(name: &str, value: f64, unit: &str, description: &str) -> BenchmarkMetric {
+    BenchmarkMetric {
+        name: name.to_string(),
+        value,
+        unit: unit.to_string(),
+        description: description.to_string(),
+    }
 }
 
 fn round2(v: f64) -> f64 {

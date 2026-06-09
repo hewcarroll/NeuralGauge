@@ -2,7 +2,9 @@ use std::time::Instant;
 use super::{GpuConfig, BenchmarkResultPayload, BenchmarkMetric, calibrate};
 
 const WARMUP: usize = 2;
-const RUNS: usize = 5;
+const MIN_RUNS: usize = 5;
+const MAX_RUNS: usize = 100_000;
+const TARGET_SECS: f64 = 3.0;
 
 // Calibration anchors: (TFLOPS, score)
 const GPU_ANCHORS: &[(f64, f64)] = &[
@@ -158,10 +160,12 @@ pub async fn run(config: GpuConfig) -> Result<BenchmarkResultPayload, String> {
 
     let dispatch_count = (n + workgroup_size - 1) / workgroup_size;
 
-    // Warmup + measured runs
+    // Warmup + time-budgeted measured runs
     let mut durations: Vec<f64> = Vec::new();
+    let bench_start = Instant::now();
+    let mut run_idx = 0usize;
 
-    for run_idx in 0..(WARMUP + RUNS) {
+    loop {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Bench Encoder"),
         });
@@ -182,6 +186,12 @@ pub async fn run(config: GpuConfig) -> Result<BenchmarkResultPayload, String> {
 
         if run_idx >= WARMUP {
             durations.push(elapsed);
+        }
+        run_idx += 1;
+
+        let done = durations.len() >= MIN_RUNS && bench_start.elapsed().as_secs_f64() >= TARGET_SECS;
+        if done || durations.len() >= MAX_RUNS {
+            break;
         }
     }
 
@@ -227,7 +237,7 @@ pub async fn run(config: GpuConfig) -> Result<BenchmarkResultPayload, String> {
                 description: format!("{iterations} FMA iterations per element"),
             },
         ],
-        run_count: RUNS,
+        run_count: durations.len(),
         warmup_count: WARMUP,
         median_raw: round2(tflops),
         variance: round2(tflops_std),

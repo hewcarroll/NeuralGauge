@@ -579,8 +579,9 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
               </div>
             </>
           ) : (
-            <div className="bg-surface border border-red-500/20 rounded-xl p-8 text-center text-red-400">
-              Analysis failed to load.
+            <div className="bg-surface border border-white/10 rounded-xl p-8 text-center text-gray-400">
+              <p className="font-semibold text-gray-300 mb-1">No AI analysis</p>
+              <p className="text-sm">Connect an AI provider in Settings (top-right) to get model recommendations and an engineer's verdict based on these results.</p>
             </div>
           )}
         </div>

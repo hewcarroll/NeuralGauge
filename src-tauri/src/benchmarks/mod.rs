@@ -5,6 +5,7 @@ pub mod npu;
 pub mod ram;
 
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,15 +65,37 @@ pub struct RamConfig {
     pub thread_count: Option<usize>,
 }
 
-/// Run a closure `warmup + runs` times, discard warmup, return sorted measured values.
-pub fn warmup_and_measure<F: FnMut() -> f64>(mut f: F, warmup: usize, runs: usize) -> MeasurementStats {
-    // Warmup
+/// Time-budgeted measurement: discard `warmup` iterations, then keep sampling
+/// `f` until at least `min_runs` samples are collected AND `target_secs` of
+/// wall-clock has elapsed (hard-capped at `max_runs`). Because `f` returns a
+/// per-iteration *rate* (e.g. GFLOPS / GB/s), running more iterations does not
+/// change the measured rate or the resulting score — it only makes each
+/// benchmark run for a meaningful, perceptible duration and tightens the
+/// confidence interval. Faster hardware simply collects more samples.
+pub fn measure_timed<F: FnMut() -> f64>(
+    mut f: F,
+    warmup: usize,
+    min_runs: usize,
+    max_runs: usize,
+    target_secs: f64,
+) -> MeasurementStats {
     for _ in 0..warmup {
         let _ = f();
     }
+    let start = Instant::now();
+    let mut values: Vec<f64> = Vec::new();
+    loop {
+        values.push(f());
+        let done = values.len() >= min_runs && start.elapsed().as_secs_f64() >= target_secs;
+        if done || values.len() >= max_runs {
+            break;
+        }
+    }
+    stats_from(values)
+}
 
-    // Measured runs
-    let mut values: Vec<f64> = (0..runs).map(|_| f()).collect();
+/// Compute summary statistics from a set of per-iteration measurements.
+fn stats_from(mut values: Vec<f64>) -> MeasurementStats {
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let n = values.len() as f64;

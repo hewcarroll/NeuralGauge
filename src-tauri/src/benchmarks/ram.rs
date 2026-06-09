@@ -1,9 +1,11 @@
 use std::time::Instant;
 use rayon::prelude::*;
-use super::{RamConfig, BenchmarkResultPayload, BenchmarkMetric, warmup_and_measure, calibrate};
+use super::{RamConfig, BenchmarkResultPayload, BenchmarkMetric, measure_timed, calibrate};
 
-const WARMUP: usize = 2;
-const RUNS: usize = 5;
+const WARMUP: usize = 3;
+const MIN_RUNS: usize = 5;
+const MAX_RUNS: usize = 100_000;
+const TARGET_SECS: f64 = 1.0;
 
 // Calibration anchors: (Triad GB/s, score)
 const RAM_ANCHORS: &[(f64, f64)] = &[
@@ -75,7 +77,7 @@ pub fn run(config: RamConfig) -> Result<BenchmarkResultPayload, String> {
     let bytes_per_element = std::mem::size_of::<f64>() as f64;
 
     // Copy: reads a, writes b = 2 * n * 8 bytes
-    let copy_stats = warmup_and_measure(
+    let copy_stats = measure_timed(
         || {
             let start = Instant::now();
             stream_copy(&a, &mut b);
@@ -84,11 +86,13 @@ pub fn run(config: RamConfig) -> Result<BenchmarkResultPayload, String> {
             (2.0 * n as f64 * bytes_per_element) / elapsed / 1e9
         },
         WARMUP,
-        RUNS,
+        MIN_RUNS,
+        MAX_RUNS,
+        TARGET_SECS,
     );
 
     // Scale: reads a, writes b = 2 * n * 8 bytes
-    let scale_stats = warmup_and_measure(
+    let scale_stats = measure_timed(
         || {
             let start = Instant::now();
             stream_scale(&a, &mut b, scalar);
@@ -97,11 +101,13 @@ pub fn run(config: RamConfig) -> Result<BenchmarkResultPayload, String> {
             (2.0 * n as f64 * bytes_per_element) / elapsed / 1e9
         },
         WARMUP,
-        RUNS,
+        MIN_RUNS,
+        MAX_RUNS,
+        TARGET_SECS,
     );
 
     // Add: reads a, reads b, writes c = 3 * n * 8 bytes
-    let add_stats = warmup_and_measure(
+    let add_stats = measure_timed(
         || {
             let start = Instant::now();
             stream_add(&a, &b, &mut c);
@@ -110,11 +116,13 @@ pub fn run(config: RamConfig) -> Result<BenchmarkResultPayload, String> {
             (3.0 * n as f64 * bytes_per_element) / elapsed / 1e9
         },
         WARMUP,
-        RUNS,
+        MIN_RUNS,
+        MAX_RUNS,
+        TARGET_SECS,
     );
 
     // Triad: reads b, reads c, writes a = 3 * n * 8 bytes
-    let triad_stats = warmup_and_measure(
+    let triad_stats = measure_timed(
         || {
             let start = Instant::now();
             stream_triad(&mut a, &b, &c, scalar);
@@ -123,7 +131,9 @@ pub fn run(config: RamConfig) -> Result<BenchmarkResultPayload, String> {
             (3.0 * n as f64 * bytes_per_element) / elapsed / 1e9
         },
         WARMUP,
-        RUNS,
+        MIN_RUNS,
+        MAX_RUNS,
+        TARGET_SECS,
     );
 
     let score = calibrate(triad_stats.median, RAM_ANCHORS);
@@ -164,7 +174,7 @@ pub fn run(config: RamConfig) -> Result<BenchmarkResultPayload, String> {
                 description: "Total test buffer per array".to_string(),
             },
         ],
-        run_count: RUNS,
+        run_count: triad_stats.values.len(),
         warmup_count: WARMUP,
         median_raw: round2(triad_stats.median),
         variance: round2(triad_stats.std_dev),

@@ -1,15 +1,16 @@
 
 import React, { useState, useEffect } from 'react';
-import { ComponentType, BenchmarkResult, AnalysisResult, BenchmarkConfig, ConfigPreset, DEFAULT_CONFIG, SavedSession, AIProviderType, AIProviderConfig } from './types';
+import { ComponentType, BenchmarkResult, AnalysisResult, BenchmarkConfig, ConfigPreset, DEFAULT_CONFIG, SavedSession, AIProviderType, AIProviderConfig, SystemInfo } from './types';
 import { runBenchmark } from './services/benchmarks';
 import { analyzeResults } from './services/analysisService';
+import { getSystemInfo } from './services/systemInfo';
 import BenchmarkCard from './components/BenchmarkCard';
 import ResultsView from './components/ResultsView';
 import ConfigModal from './components/ConfigModal';
 import ProgressBar from './components/ProgressBar';
 import SessionHistory from './components/SessionHistory';
 import AISettingsModal from './components/AISettingsModal';
-import { Activity, Terminal, Settings } from 'lucide-react';
+import { Activity, Terminal, Settings, Cpu } from 'lucide-react';
 
 enum AppState {
   IDLE,
@@ -45,6 +46,7 @@ const App: React.FC = () => {
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [aiConfig, setAiConfig] = useState<AIProviderConfig>(DEFAULT_AI_CONFIG);
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
+  const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null);
 
   // Load config, presets & sessions from local storage on mount
   useEffect(() => {
@@ -74,6 +76,13 @@ const App: React.FC = () => {
         setAiConfig({ ...DEFAULT_AI_CONFIG, ...JSON.parse(savedAiConfig) });
       } catch(e) { console.error(e); }
     }
+  }, []);
+
+  // Detect host hardware (CPU / GPU / RAM / OS) on mount
+  useEffect(() => {
+    getSystemInfo()
+      .then(setSystemInfo)
+      .catch(err => console.error('Failed to detect system info', err));
   }, []);
 
   const savePreset = (name: string, cfg: BenchmarkConfig) => {
@@ -205,7 +214,7 @@ const App: React.FC = () => {
              <div className="w-8 h-8 bg-gradient-to-tr from-primary to-accent rounded flex items-center justify-center">
                 <Activity className="text-black w-5 h-5" />
              </div>
-             <span className="font-bold text-xl tracking-tight text-white">Vel<span className="text-primary">mur</span></span>
+             <span className="font-bold text-xl tracking-tight text-white">Neural<span className="text-primary">Gauge</span></span>
           </div>
           <div className="flex items-center gap-4 text-xs font-mono text-gray-500">
             <button
@@ -238,11 +247,52 @@ const App: React.FC = () => {
               </p>
             </div>
 
+            {/* Detected hardware */}
+            <div className="max-w-3xl mx-auto bg-surface border border-white/10 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Cpu size={16} className="text-primary" />
+                <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Detected Hardware</h2>
+              </div>
+              {systemInfo ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500">Processor</span>
+                    <span className="text-gray-200 text-right font-medium">{systemInfo.cpuModel}</span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500">Cores</span>
+                    <span className="text-gray-200 text-right">
+                      {systemInfo.cpuCoresPhysical}C / {systemInfo.cpuCoresLogical}T
+                      {systemInfo.cpuFrequencyMhz ? ` @ ${(systemInfo.cpuFrequencyMhz / 1000).toFixed(2)} GHz` : ''}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500">Graphics</span>
+                    <span className="text-gray-200 text-right font-medium">
+                      {systemInfo.gpuName}
+                      {systemInfo.gpuBackend && systemInfo.gpuBackend !== 'None' ? ` (${systemInfo.gpuBackend})` : ''}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500">Memory</span>
+                    <span className="text-gray-200 text-right">{systemInfo.ramTotalGb.toFixed(1)} GB</span>
+                  </div>
+                  <div className="flex justify-between gap-4 sm:col-span-2">
+                    <span className="text-gray-500">System</span>
+                    <span className="text-gray-200 text-right">{systemInfo.os}</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 italic">Detecting hardware…</p>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               <BenchmarkCard
                 type={ComponentType.CPU}
                 label="CPU Compute"
                 description="Multi-threaded SIMD matrix multiplication and cache latency measurement."
+                detail={systemInfo?.cpuModel}
                 onRun={handleBenchmarkClick}
                 disabled={false}
               />
@@ -250,6 +300,7 @@ const App: React.FC = () => {
                 type={ComponentType.GPU}
                 label="GPU Compute"
                 description="Native GPU compute shader TFLOPS via wgpu (Vulkan/DX12/Metal)."
+                detail={systemInfo?.gpuName}
                 onRun={handleBenchmarkClick}
                 disabled={false}
               />
@@ -264,6 +315,7 @@ const App: React.FC = () => {
                 type={ComponentType.GPU_MEMORY}
                 label="VRAM Bandwidth"
                 description="GPU memory bandwidth: upload, download, and internal transfer rates."
+                detail={systemInfo?.gpuName}
                 onRun={handleBenchmarkClick}
                 disabled={false}
               />
@@ -271,6 +323,7 @@ const App: React.FC = () => {
                 type={ComponentType.RAM}
                 label="RAM Bandwidth"
                 description="STREAM-style DRAM bandwidth: Copy, Scale, Add, Triad."
+                detail={systemInfo ? `${systemInfo.ramTotalGb.toFixed(0)} GB total` : undefined}
                 onRun={handleBenchmarkClick}
                 disabled={false}
               />

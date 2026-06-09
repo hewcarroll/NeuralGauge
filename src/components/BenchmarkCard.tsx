@@ -7,11 +7,13 @@ interface BenchmarkCardProps {
   type: ComponentType;
   label: string;
   description: string;
+  /** Detected hardware this card will test (e.g. the CPU/GPU model). */
+  detail?: string;
   onRun: (type: ComponentType) => void;
   disabled: boolean;
 }
 
-const BenchmarkCard: React.FC<BenchmarkCardProps> = ({ type, label, description, onRun, disabled }) => {
+const BenchmarkCard: React.FC<BenchmarkCardProps> = ({ type, label, description, detail, onRun, disabled }) => {
   const colorClass = COMPONENT_COLORS[type];
 
   return (
@@ -29,7 +31,15 @@ const BenchmarkCard: React.FC<BenchmarkCardProps> = ({ type, label, description,
       </div>
 
       <h3 className="text-xl font-bold text-white mb-2 tracking-tight">{label}</h3>
-      <p className="text-gray-400 text-sm mb-6 h-12">{description}</p>
+      <p className="text-gray-400 text-sm mb-2 min-h-[3rem]">{description}</p>
+
+      {detail ? (
+        <p className="text-xs font-medium text-primary/90 mb-4 truncate" title={detail}>
+          {detail}
+        </p>
+      ) : (
+        <div className="h-4 mb-4" />
+      )}
 
       <button
         onClick={() => !disabled && onRun(type)}

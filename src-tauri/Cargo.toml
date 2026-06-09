@@ -27,5 +27,13 @@ tokio = { version = "1", features = ["full"] }
 panic = "abort"
 codegen-units = 1
 lto = true
-opt-level = "s"
+opt-level = 3
 strip = true
+
+# Optimize the benchmark crate even in dev builds. `tauri dev` uses the debug
+# (unoptimized) profile, where the matmul / latency hot paths run ~100x too
+# slow and produce meaningless numbers. Optimizing only our own package keeps
+# dev compile fast (deps stay unoptimized) while making the measured code
+# representative.
+[profile.dev.package.neuralgauge]
+opt-level = 3
