@@ -4,49 +4,73 @@ use super::{GpuConfig, BenchmarkResultPayload, BenchmarkMetric, calibrate};
 const WARMUP: usize = 2;
 const MIN_RUNS: usize = 5;
 const MAX_RUNS: usize = 100_000;
-const TARGET_SECS: f64 = 3.0;
+const TARGET_SECS: f64 = 2.0; // per kernel; the battery runs two kernels
 
-// Calibration anchors: (TFLOPS, score)
+// Calibration anchors: (FP32 TFLOPS, score)
 const GPU_ANCHORS: &[(f64, f64)] = &[
-    (0.5,   1000.0),   // Intel UHD 730
-    (5.0,   3000.0),   // RTX 3050
-    (15.0,  5000.0),   // RTX 3070
-    (35.0,  7500.0),   // RTX 4080
-    (80.0, 10000.0),   // RTX 4090
+    (0.5,   1000.0),   // basic iGPU
+    (5.0,   3000.0),   // RTX 3050 class
+    (15.0,  5000.0),   // RTX 3070 / Arc A770 class
+    (35.0,  7500.0),   // RTX 4080 class
+    (80.0, 10000.0),   // RTX 4090 class
 ];
 
-const SHADER_SOURCE: &str = r#"
+// Each shader loads its two operands once and does `iterations` multiply-adds
+// (2 ops each) in a tight ALU loop, so the test is compute-bound.
+const SHADER_F32: &str = r#"
 @group(0) @binding(0) var<storage, read> a : array<f32>;
 @group(0) @binding(1) var<storage, read> b : array<f32>;
 @group(0) @binding(2) var<storage, read_write> c : array<f32>;
-
-struct Params {
-    n: u32,
-    iterations: u32,
-}
+struct Params { n: u32, iterations: u32 }
 @group(0) @binding(3) var<uniform> params : Params;
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
     let idx = gid.x;
-    let n = params.n;
-    if idx >= n {
-        return;
-    }
-    var acc = 0.0f;
+    if idx >= params.n { return; }
+    let av = a[idx];
+    let bv = b[idx];
+    var acc = 0.0;
     for (var it = 0u; it < params.iterations; it++) {
-        acc = fma(a[idx], b[idx], acc);
+        acc = acc + av * bv;
     }
     c[idx] = acc;
 }
 "#;
 
+const SHADER_I32: &str = r#"
+@group(0) @binding(0) var<storage, read> a : array<i32>;
+@group(0) @binding(1) var<storage, read> b : array<i32>;
+@group(0) @binding(2) var<storage, read_write> c : array<i32>;
+struct Params { n: u32, iterations: u32 }
+@group(0) @binding(3) var<uniform> params : Params;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
+    let idx = gid.x;
+    if idx >= params.n { return; }
+    let av = a[idx];
+    let bv = b[idx];
+    var acc : i32 = 0;
+    for (var it = 0u; it < params.iterations; it++) {
+        acc = acc + av * bv;
+    }
+    c[idx] = acc;
+}
+"#;
+
+struct KernelStats {
+    median: f64,
+    std_dev: f64,
+    ci: [f64; 2],
+    runs: usize,
+}
+
 pub async fn run(config: GpuConfig) -> Result<BenchmarkResultPayload, String> {
     let iterations = config.iterations.unwrap_or(4096);
     let workgroup_size: u32 = config.workgroup_size.unwrap_or(256);
-    let n: u32 = 1024 * 1024; // 1M elements
+    let n: u32 = 1024 * 1024; // 1M elements (proven stable)
 
-    // Initialize wgpu
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
         ..Default::default()
@@ -60,22 +84,58 @@ pub async fn run(config: GpuConfig) -> Result<BenchmarkResultPayload, String> {
         .await
         .ok_or("No GPU adapter found")?;
 
-    let adapter_info = adapter.get_info();
-    let gpu_name = adapter_info.name.clone();
-    let backend = format!("{:?}", adapter_info.backend);
-
     let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            label: Some("NeuralGauge GPU Benchmark"),
-            ..Default::default()
-        }, None)
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("NeuralGauge GPU Benchmark"),
+                ..Default::default()
+            },
+            None,
+        )
         .await
         .map_err(|e| format!("Failed to create device: {e}"))?;
 
-    // Create buffers
-    let buf_size = (n as u64) * 4;
-    let a_data: Vec<f32> = (0..n).map(|i| (i as f32 * 0.001) % 1.0).collect();
-    let b_data: Vec<f32> = (0..n).map(|i| ((i + 7) as f32 * 0.0013) % 1.0).collect();
+    let a_f32: Vec<f32> = (0..n).map(|i| (i as f32 * 0.001) % 1.0 + 0.5).collect();
+    let b_f32: Vec<f32> = (0..n).map(|i| ((i + 7) as f32 * 0.0013) % 1.0 + 0.5).collect();
+    let a_i32: Vec<i32> = (0..n).map(|i| (i as i32 % 7) + 1).collect();
+    let b_i32: Vec<i32> = (0..n).map(|i| (i as i32 % 13) + 1).collect();
+
+    let fp32 = run_kernel(&device, &queue, SHADER_F32, n, iterations, workgroup_size, cast(&a_f32), cast(&b_f32), 4);
+    let int32 = run_kernel(&device, &queue, SHADER_I32, n, iterations, workgroup_size, cast(&a_i32), cast(&b_i32), 4);
+
+    let score = calibrate(fp32.median, GPU_ANCHORS);
+
+    let metrics = vec![
+        metric("FP32 Compute", round2(fp32.median), "TFLOPS", "FP32 multiply-add throughput via compute shader"),
+        metric("INT32 Compute", round2(int32.median), "TOPS", "INT32 multiply-add throughput"),
+    ];
+
+    Ok(BenchmarkResultPayload {
+        component_type: "GPU".to_string(),
+        score,
+        metrics,
+        run_count: fp32.runs,
+        warmup_count: WARMUP,
+        median_raw: round2(fp32.median),
+        variance: round2(fp32.std_dev),
+        confidence_interval: [round2(fp32.ci[0]), round2(fp32.ci[1])],
+        error: None,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_kernel(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    shader_src: &str,
+    n: u32,
+    iterations: u32,
+    workgroup_size: u32,
+    a_bytes: &[u8],
+    b_bytes: &[u8],
+    elem_bytes: u64,
+) -> KernelStats {
+    let buf_size = (n as u64) * elem_bytes;
 
     let buf_a = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("A"),
@@ -103,22 +163,21 @@ pub async fn run(config: GpuConfig) -> Result<BenchmarkResultPayload, String> {
         mapped_at_creation: false,
     });
 
-    queue.write_buffer(&buf_a, 0, bytemuck_cast_slice(&a_data));
-    queue.write_buffer(&buf_b, 0, bytemuck_cast_slice(&b_data));
+    queue.write_buffer(&buf_a, 0, a_bytes);
+    queue.write_buffer(&buf_b, 0, b_bytes);
     queue.write_buffer(&buf_params, 0, bytemuck_cast_slice(&params_data));
 
-    // Create pipeline
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("GPU Bench Shader"),
-        source: wgpu::ShaderSource::Wgsl(SHADER_SOURCE.into()),
+        source: wgpu::ShaderSource::Wgsl(shader_src.into()),
     });
 
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: None,
         entries: &[
-            bgl_entry(0, true),  // a: read
-            bgl_entry(1, true),  // b: read
-            bgl_entry(2, false), // c: read_write
+            bgl_entry(0, true),
+            bgl_entry(1, true),
+            bgl_entry(2, false),
             wgpu::BindGroupLayoutEntry {
                 binding: 3,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -160,7 +219,6 @@ pub async fn run(config: GpuConfig) -> Result<BenchmarkResultPayload, String> {
 
     let dispatch_count = (n + workgroup_size - 1) / workgroup_size;
 
-    // Warmup + time-budgeted measured runs
     let mut durations: Vec<f64> = Vec::new();
     let bench_start = Instant::now();
     let mut run_idx = 0usize;
@@ -195,67 +253,45 @@ pub async fn run(config: GpuConfig) -> Result<BenchmarkResultPayload, String> {
         }
     }
 
-    durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let median_duration = durations[durations.len() / 2];
+    // ops/sec in tera-ops (2 ops per multiply-add iteration, per element)
+    let total_ops = (n as f64) * (iterations as f64) * 2.0;
+    let mut tput: Vec<f64> = durations.iter().map(|d| total_ops / d / 1e12).collect();
+    tput.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Each of the N elements does `iterations` FMA ops (2 flops each)
-    let total_flops = (n as f64) * (iterations as f64) * 2.0;
-    let tflops = total_flops / median_duration / 1e12;
+    let nf = tput.len() as f64;
+    let median = tput[tput.len() / 2];
+    let mean = tput.iter().sum::<f64>() / nf;
+    let std_dev = (tput.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / nf).sqrt();
+    let margin = 1.96 * std_dev / nf.sqrt();
 
-    let mean = durations.iter().sum::<f64>() / durations.len() as f64;
-    let variance = durations.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / durations.len() as f64;
-    let std_dev = variance.sqrt();
-    let _margin = 1.96 * std_dev / (durations.len() as f64).sqrt();
+    KernelStats {
+        median,
+        std_dev,
+        ci: [mean - margin, mean + margin],
+        runs: tput.len(),
+    }
+}
 
-    let tflops_values: Vec<f64> = durations.iter().map(|d| total_flops / d / 1e12).collect();
-    let mean_tflops = tflops_values.iter().sum::<f64>() / tflops_values.len() as f64;
-    let tflops_std = tflops_values.iter().map(|t| (t - mean_tflops).powi(2)).sum::<f64>().sqrt() / tflops_values.len() as f64;
-    let tflops_margin = 1.96 * tflops_std / (tflops_values.len() as f64).sqrt();
-
-    let score = calibrate(tflops, GPU_ANCHORS);
-
-    Ok(BenchmarkResultPayload {
-        component_type: "GPU".to_string(),
-        score,
-        metrics: vec![
-            BenchmarkMetric {
-                name: "Compute Speed".to_string(),
-                value: round2(tflops),
-                unit: "TFLOPS".to_string(),
-                description: "FP32 FMA throughput via compute shader".to_string(),
-            },
-            BenchmarkMetric {
-                name: "GPU".to_string(),
-                value: 0.0,
-                unit: gpu_name,
-                description: format!("Backend: {backend}"),
-            },
-            BenchmarkMetric {
-                name: "Elements".to_string(),
-                value: n as f64,
-                unit: "".to_string(),
-                description: format!("{iterations} FMA iterations per element"),
-            },
-        ],
-        run_count: durations.len(),
-        warmup_count: WARMUP,
-        median_raw: round2(tflops),
-        variance: round2(tflops_std),
-        confidence_interval: [round2(mean_tflops - tflops_margin), round2(mean_tflops + tflops_margin)],
-        error: None,
-    })
+fn metric(name: &str, value: f64, unit: &str, description: &str) -> BenchmarkMetric {
+    BenchmarkMetric {
+        name: name.to_string(),
+        value,
+        unit: unit.to_string(),
+        description: description.to_string(),
+    }
 }
 
 fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
 
+fn cast<T: Copy>(data: &[T]) -> &[u8] {
+    bytemuck_cast_slice(data)
+}
+
 fn bytemuck_cast_slice<T: Copy>(data: &[T]) -> &[u8] {
     unsafe {
-        std::slice::from_raw_parts(
-            data.as_ptr() as *const u8,
-            data.len() * std::mem::size_of::<T>(),
-        )
+        std::slice::from_raw_parts(data.as_ptr() as *const u8, std::mem::size_of_val(data))
     }
 }
 
