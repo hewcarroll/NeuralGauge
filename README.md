@@ -40,8 +40,11 @@ Pre-built installers will be published on the [Releases](https://github.com/hewc
 
 **Prerequisites:** [Rust](https://rustup.rs) (stable), [Node.js](https://nodejs.org) 18+, and the [Tauri v2 system prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
 
+The benchmark engine, [`rust-hwbench`](https://github.com/hewcarroll/rust-hwbench), is consumed via a local path dependency, so clone both repos **side by side**:
+
 ```bash
 git clone https://github.com/hewcarroll/NeuralGauge.git
+git clone https://github.com/hewcarroll/rust-hwbench.git   # sibling of NeuralGauge
 cd NeuralGauge
 npm install
 npm run tauri:dev      # run in development

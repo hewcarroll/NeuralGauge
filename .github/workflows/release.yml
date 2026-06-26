@@ -1,0 +1,91 @@
+name: Release
+
+# Cut a release by pushing a tag, e.g.  git tag v1.0.0 && git push origin v1.0.0
+# Builds installers for Linux, macOS, and Windows and uploads them to a DRAFT
+# GitHub Release (review the assets, then publish manually). workflow_dispatch is
+# available for a manual test build (it will also produce a draft).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# tauri-action creates the GitHub Release and uploads installers.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Apple Silicon + Intel in one universal binary.
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+          # Build on the oldest supported Ubuntu for the widest glibc compatibility.
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout NeuralGauge
+        uses: actions/checkout@v4
+
+      # NeuralGauge consumes the rust-hwbench engine via a local path dependency
+      # (src-tauri/Cargo.toml -> `../../rust-hwbench`). Clone it as a sibling of the
+      # workspace so the path resolves identically to local dev — no manifest edits,
+      # and `cargo build` stays the single source of truth for the engine.
+      - name: Fetch rust-hwbench engine (path dependency)
+        run: git clone --depth 1 https://github.com/hewcarroll/rust-hwbench.git ../rust-hwbench
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev \
+            libssl-dev
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and publish (draft release)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "NeuralGauge ${{ github.ref_name }}"
+          releaseBody: |
+            A free, native hardware benchmark for AI workloads (CPU / GPU / RAM / VRAM / NPU).
+
+            Download the installer for your OS below. These builds are **unsigned**:
+            - **Windows**: SmartScreen may warn — click **More info → Run anyway**.
+            - **macOS**: right-click the app → **Open** (Gatekeeper warns on unsigned apps).
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
