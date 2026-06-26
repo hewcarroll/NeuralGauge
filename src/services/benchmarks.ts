@@ -3,7 +3,7 @@ import { ComponentType, BenchmarkResult, BenchmarkConfig } from '../types';
 
 interface RustBenchmarkResult {
   componentType: string;
-  score: number;
+  score: number | null; // rust-hwbench returns null for unscored components (e.g. NPU)
   metrics: { name: string; value: number; unit: string; description: string }[];
   runCount: number;
   warmupCount: number;
@@ -16,7 +16,7 @@ interface RustBenchmarkResult {
 function mapResult(raw: RustBenchmarkResult, type: ComponentType, startTime: number): BenchmarkResult {
   return {
     type,
-    score: raw.score,
+    score: raw.score ?? 0,
     metrics: raw.metrics,
     timestamp: Date.now(),
     durationMs: Date.now() - startTime,

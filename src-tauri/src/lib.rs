@@ -1,37 +1,54 @@
-mod system;
-mod benchmarks;
-
-use benchmarks::{BenchmarkResultPayload, CpuConfig, GpuConfig, VramConfig, NpuConfig, RamConfig};
-use system::SystemInfo;
+//! NeuralGauge's Tauri command layer.
+//!
+//! The benchmark engine (CPU/GPU/RAM/VRAM/NPU measurement + system detection)
+//! lives in the `rust-hwbench` crate. This file is the thin desktop shell on top:
+//! it exposes the engine to the UI as Tauri commands and applies the opt-in,
+//! calibrated 0–10000 `score` (rust-hwbench returns raw measurements with
+//! `score: None`; the opinionated score is NeuralGauge's layer).
+use rust_hwbench::{
+    benchmarks, score, BenchmarkResultPayload, CpuConfig, GpuConfig, NpuConfig, RamConfig,
+    SystemInfo, VramConfig,
+};
 
 #[tauri::command]
 async fn get_system_info() -> Result<SystemInfo, String> {
-    system::detect().await
+    rust_hwbench::system::detect().await
 }
 
 #[tauri::command]
 async fn run_cpu_benchmark(config: CpuConfig) -> Result<BenchmarkResultPayload, String> {
-    benchmarks::cpu::run(config).map_err(|e| e.to_string())
+    let mut r = benchmarks::cpu::run(config).map_err(|e| e.to_string())?;
+    r.score = score(&r);
+    Ok(r)
 }
 
 #[tauri::command]
 async fn run_gpu_benchmark(config: GpuConfig) -> Result<BenchmarkResultPayload, String> {
-    benchmarks::gpu::run(config).await.map_err(|e| e.to_string())
+    let mut r = benchmarks::gpu::run(config).await.map_err(|e| e.to_string())?;
+    r.score = score(&r);
+    Ok(r)
 }
 
 #[tauri::command]
 async fn run_vram_benchmark(config: VramConfig) -> Result<BenchmarkResultPayload, String> {
-    benchmarks::vram::run(config).await.map_err(|e| e.to_string())
+    let mut r = benchmarks::vram::run(config).await.map_err(|e| e.to_string())?;
+    r.score = score(&r);
+    Ok(r)
 }
 
 #[tauri::command]
 async fn run_npu_benchmark(config: NpuConfig) -> Result<BenchmarkResultPayload, String> {
-    benchmarks::npu::run(config).map_err(|e| e.to_string())
+    // NPU has no calibrated scale, so score() returns None (the UI renders 0).
+    let mut r = benchmarks::npu::run(config).map_err(|e| e.to_string())?;
+    r.score = score(&r);
+    Ok(r)
 }
 
 #[tauri::command]
 async fn run_ram_benchmark(config: RamConfig) -> Result<BenchmarkResultPayload, String> {
-    benchmarks::ram::run(config).map_err(|e| e.to_string())
+    let mut r = benchmarks::ram::run(config).map_err(|e| e.to_string())?;
+    r.score = score(&r);
+    Ok(r)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
