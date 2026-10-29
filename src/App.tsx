@@ -11,6 +11,7 @@ import ProgressBar from './components/ProgressBar';
 import SessionHistory from './components/SessionHistory';
 import AISettingsModal from './components/AISettingsModal';
 import { Activity, Terminal, Settings, Cpu } from 'lucide-react';
+import { upgradeSession } from './services/sessions';
 
 enum AppState {
   IDLE,
@@ -67,7 +68,7 @@ const App: React.FC = () => {
     const savedSessionsData = localStorage.getItem(SESSIONS_STORAGE_KEY);
     if (savedSessionsData) {
       try {
-        setSavedSessions(JSON.parse(savedSessionsData));
+        setSavedSessions((JSON.parse(savedSessionsData) as SavedSession[]).map(upgradeSession));
       } catch(e) { console.error(e); }
     }
     const savedAiConfig = localStorage.getItem(AI_PROVIDER_STORAGE_KEY);
@@ -119,7 +120,7 @@ const App: React.FC = () => {
   };
 
   const handleLoadSession = (session: SavedSession) => {
-    setResults(session.results);
+    setResults(upgradeSession(session).results);
     setAnalysis(session.analysis);
     setAppState(AppState.RESULTS);
   };

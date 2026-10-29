@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BenchmarkResult, AnalysisResult, ComponentType, SavedSession } from '../types';
 import { COMPONENT_ICONS, GLOBAL_AVERAGES } from '../constants';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, CartesianGrid, Legend } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, CartesianGrid, Legend, ErrorBar } from 'recharts';
 import ReactMarkdown from 'react-markdown';
 import { RefreshCw, Cpu, Brain, Download, AlertTriangle, Save, Layers, BrainCircuit, Timer, Check, X, ArrowUpRight, ArrowDownRight, Scale, Zap } from 'lucide-react';
 
@@ -11,6 +11,13 @@ interface ResultsViewProps {
   onReset: () => void;
   loadingAnalysis: boolean;
   onSave?: (name: string) => void;
+}
+
+/** How to label a result's interval: current runs report the median's interval;
+ *  sessions saved by 1.0.x carry the old interval of the mean. */
+function ciLabel(res: BenchmarkResult): string {
+  if (res.legacyStats) return '95% CI (mean, legacy)';
+  return res.medianCiValid ? '95% CI (median)' : 'Range (too few runs for 95%)';
 }
 
 const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, loadingAnalysis, onSave }) => {
@@ -256,12 +263,12 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                           <span className="text-gray-400 font-mono">{res.medianRaw.toFixed(4)}</span>
                         </div>
                         <div className="flex justify-between text-xs text-gray-600">
-                          <span>Variance</span>
-                          <span className="text-gray-400 font-mono">{res.variance.toFixed(6)}</span>
+                          <span>Std dev</span>
+                          <span className="text-gray-400 font-mono">{res.stdDev.toFixed(4)}{Number.isFinite(res.cvPercent) ? ` (${res.cvPercent.toFixed(1)}%)` : ''}</span>
                         </div>
                         <div className="flex justify-between text-xs text-gray-600">
-                          <span>95% CI</span>
-                          <span className="text-gray-400 font-mono">[{res.confidenceInterval[0].toFixed(4)}, {res.confidenceInterval[1].toFixed(4)}]</span>
+                          <span>{ciLabel(res)}</span>
+                          <span className="text-gray-400 font-mono">[{res.medianCi95[0].toFixed(4)}, {res.medianCi95[1].toFixed(4)}]</span>
                         </div>
                         <div className="flex justify-between text-xs text-gray-600">
                           <span>Runs</span>
@@ -326,9 +333,9 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                     <th className="text-left py-2 px-3 text-gray-400 font-medium">Component</th>
                     <th className="text-right py-2 px-3 text-gray-400 font-medium">Score</th>
                     <th className="text-right py-2 px-3 text-gray-400 font-medium">Median</th>
-                    <th className="text-right py-2 px-3 text-gray-400 font-medium">Variance</th>
-                    <th className="text-right py-2 px-3 text-gray-400 font-medium">95% CI Low</th>
-                    <th className="text-right py-2 px-3 text-gray-400 font-medium">95% CI High</th>
+                    <th className="text-right py-2 px-3 text-gray-400 font-medium">Std dev</th>
+                    <th className="text-right py-2 px-3 text-gray-400 font-medium">CV</th>
+                    <th className="text-right py-2 px-3 text-gray-400 font-medium">Median 95% CI</th>
                     <th className="text-right py-2 px-3 text-gray-400 font-medium">Runs</th>
                     <th className="text-right py-2 px-3 text-gray-400 font-medium">Duration</th>
                   </tr>
@@ -346,13 +353,13 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                         {res.error ? '—' : res.medianRaw.toFixed(4)}
                       </td>
                       <td className="text-right py-2 px-3 font-mono text-gray-300">
-                        {res.error ? '—' : res.variance.toFixed(6)}
+                        {res.error ? '—' : res.stdDev.toFixed(4)}
                       </td>
                       <td className="text-right py-2 px-3 font-mono text-gray-300">
-                        {res.error ? '—' : res.confidenceInterval[0].toFixed(4)}
+                        {res.error || !Number.isFinite(res.cvPercent) ? '—' : `${res.cvPercent.toFixed(1)}%`}
                       </td>
-                      <td className="text-right py-2 px-3 font-mono text-gray-300">
-                        {res.error ? '—' : res.confidenceInterval[1].toFixed(4)}
+                      <td className="text-right py-2 px-3 font-mono text-gray-300" title={ciLabel(res)}>
+                        {res.error ? '—' : `${res.medianCi95[0].toFixed(4)} – ${res.medianCi95[1].toFixed(4)}${res.legacyStats ? ' *' : ''}`}
                       </td>
                       <td className="text-right py-2 px-3 text-gray-400">
                         {res.runCount}
@@ -365,6 +372,9 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                 </tbody>
               </table>
             </div>
+            {results.some(r => r.legacyStats) && (
+              <p className="text-xs text-gray-500 mt-3">* Saved by NeuralGauge 1.0.x: this interval is for the mean, not the median, and its spread figure was a standard deviation.</p>
+            )}
           </div>
         </div>
 
@@ -373,16 +383,16 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
           <div className="lg:col-span-3">
             <div className="bg-surface border border-white/10 rounded-xl p-6">
               <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                <Scale size={16} className="text-primary" /> Score Distribution with Confidence Intervals
+                <Scale size={16} className="text-primary" /> Scores with 95% Intervals
               </h4>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={results.filter(r => !r.error).map(r => ({
                     name: r.type,
                     score: r.score,
-                    ciLow: Math.max(0, r.score - (r.score * (r.medianRaw - r.confidenceInterval[0]) / (r.medianRaw || 1))),
-                    ciHigh: r.score + (r.score * (r.confidenceInterval[1] - r.medianRaw) / (r.medianRaw || 1)),
-                    variance: r.variance,
+                    // The engine maps the median's interval through the same calibration as the
+                    // score, so the whiskers are the score's own 95% interval.
+                    ci: r.scoreCi95 ? [r.score - r.scoreCi95[0], r.scoreCi95[1] - r.score] : undefined,
                   }))}>
                     <CartesianGrid stroke="#333" strokeDasharray="3 3" />
                     <XAxis dataKey="name" tick={{fill: '#999', fontSize: 11}} axisLine={false} tickLine={false} />
@@ -391,15 +401,12 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                       contentStyle={{ backgroundColor: '#121212', borderColor: '#333' }}
                       itemStyle={{ color: '#fff' }}
                       cursor={{fill: 'rgba(255,255,255,0.05)'}}
-                      formatter={(value, name) => {
-                        const v = Number(value);
-                        if (name === 'variance') return [v.toFixed(6), 'Variance'];
-                        return [v, String(name)];
-                      }}
+                      formatter={(value, name) => [Number(value), String(name)]}
                     />
                     <Legend verticalAlign="bottom" height={36} iconSize={10} />
-                    <Bar dataKey="score" name="Score" fill="#00f2ea" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="variance" name="Variance" fill="#7000ff" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="score" name="Score" fill="#00f2ea" radius={[4, 4, 0, 0]}>
+                      <ErrorBar dataKey="ci" width={6} strokeWidth={1.5} stroke="#ffffff" direction="y" />
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>

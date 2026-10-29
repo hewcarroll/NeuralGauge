@@ -8,8 +8,11 @@ interface RustBenchmarkResult {
   runCount: number;
   warmupCount: number;
   medianRaw: number;
-  variance: number;
-  confidenceInterval: [number, number];
+  stdDev: number;
+  cvPercent: number;
+  medianCi95: [number, number];
+  medianCiValid: boolean;
+  scoreCi95: [number, number] | null;
   error?: string;
 }
 
@@ -23,8 +26,11 @@ function mapResult(raw: RustBenchmarkResult, type: ComponentType, startTime: num
     runCount: raw.runCount,
     warmupCount: raw.warmupCount,
     medianRaw: raw.medianRaw,
-    variance: raw.variance,
-    confidenceInterval: raw.confidenceInterval,
+    stdDev: raw.stdDev,
+    cvPercent: raw.cvPercent,
+    medianCi95: raw.medianCi95,
+    medianCiValid: raw.medianCiValid,
+    scoreCi95: raw.scoreCi95,
     error: raw.error,
   };
 }
@@ -113,8 +119,11 @@ async function runSingleBenchmark(
       runCount: 0,
       warmupCount: 0,
       medianRaw: 0,
-      variance: 0,
-      confidenceInterval: [0, 0],
+      stdDev: 0,
+      cvPercent: 0,
+      medianCi95: [0, 0],
+      medianCiValid: false,
+      scoreCi95: null,
       error: err instanceof Error ? err.message : String(err),
     };
   }

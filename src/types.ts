@@ -23,9 +23,21 @@ export interface BenchmarkResult {
   durationMs: number;
   runCount: number;
   warmupCount: number;
+  /** Median of the primary metric's per-run values, in that metric's unit. */
   medianRaw: number;
-  variance: number;
-  confidenceInterval: [number, number];
+  /** Sample standard deviation of the same per-run values. */
+  stdDev: number;
+  /** stdDev as a percentage of the mean; NaN for legacy sessions. */
+  cvPercent: number;
+  /** Distribution-free 95% interval for medianRaw; it always contains it. */
+  medianCi95: [number, number];
+  /** False when there were too few runs for a 95% interval (then it's min–max). */
+  medianCiValid: boolean;
+  /** The score at each end of medianCi95, on the score's own scale. */
+  scoreCi95: [number, number] | null;
+  /** Saved by NeuralGauge 1.0.x on rust-hwbench 0.1: its interval was for the mean
+   *  and its "variance" was a standard deviation. Shown, but labeled as such. */
+  legacyStats?: boolean;
   error?: string;
 }
 

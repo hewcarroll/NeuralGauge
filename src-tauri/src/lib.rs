@@ -6,7 +6,7 @@
 //! calibrated 0–10000 `score` (rust-hwbench returns raw measurements with
 //! `score: None`; the opinionated score is NeuralGauge's layer).
 use rust_hwbench::{
-    benchmarks, score, BenchmarkResultPayload, CpuConfig, GpuConfig, NpuConfig, RamConfig,
+    apply_score, benchmarks, BenchmarkResultPayload, CpuConfig, GpuConfig, NpuConfig, RamConfig,
     SystemInfo, VramConfig,
 };
 
@@ -18,36 +18,36 @@ async fn get_system_info() -> Result<SystemInfo, String> {
 #[tauri::command]
 async fn run_cpu_benchmark(config: CpuConfig) -> Result<BenchmarkResultPayload, String> {
     let mut r = benchmarks::cpu::run(config).map_err(|e| e.to_string())?;
-    r.score = score(&r);
+    apply_score(&mut r);
     Ok(r)
 }
 
 #[tauri::command]
 async fn run_gpu_benchmark(config: GpuConfig) -> Result<BenchmarkResultPayload, String> {
     let mut r = benchmarks::gpu::run(config).await.map_err(|e| e.to_string())?;
-    r.score = score(&r);
+    apply_score(&mut r);
     Ok(r)
 }
 
 #[tauri::command]
 async fn run_vram_benchmark(config: VramConfig) -> Result<BenchmarkResultPayload, String> {
     let mut r = benchmarks::vram::run(config).await.map_err(|e| e.to_string())?;
-    r.score = score(&r);
+    apply_score(&mut r);
     Ok(r)
 }
 
 #[tauri::command]
 async fn run_npu_benchmark(config: NpuConfig) -> Result<BenchmarkResultPayload, String> {
-    // NPU has no calibrated scale, so score() returns None (the UI renders 0).
+    // NPU has no calibrated scale, so its score stays None (the UI renders 0).
     let mut r = benchmarks::npu::run(config).map_err(|e| e.to_string())?;
-    r.score = score(&r);
+    apply_score(&mut r);
     Ok(r)
 }
 
 #[tauri::command]
 async fn run_ram_benchmark(config: RamConfig) -> Result<BenchmarkResultPayload, String> {
     let mut r = benchmarks::ram::run(config).map_err(|e| e.to_string())?;
-    r.score = score(&r);
+    apply_score(&mut r);
     Ok(r)
 }
 
