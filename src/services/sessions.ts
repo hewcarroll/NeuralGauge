@@ -10,7 +10,9 @@ export function upgradeResult(r: BenchmarkResult & { variance?: number; confiden
   const { variance, confidenceInterval, ...rest } = r;
   return {
     ...rest,
-    stdDev: variance ?? 0,
+    // 0.1's VRAM "variance" was a spread of durations in seconds, not of GB/s,
+    // and can't be converted: show it as unavailable rather than as bandwidth.
+    stdDev: r.type === 'GPU_MEMORY' ? Number.NaN : (variance ?? 0),
     cvPercent: Number.NaN,
     medianCi95: confidenceInterval ?? [0, 0],
     medianCiValid: false,

@@ -264,7 +264,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                         </div>
                         <div className="flex justify-between text-xs text-gray-600">
                           <span>Std dev</span>
-                          <span className="text-gray-400 font-mono">{res.stdDev.toFixed(4)}{Number.isFinite(res.cvPercent) ? ` (${res.cvPercent.toFixed(1)}%)` : ''}</span>
+                          <span className="text-gray-400 font-mono">{Number.isFinite(res.stdDev) ? res.stdDev.toFixed(4) : 'n/a'}{Number.isFinite(res.cvPercent) ? ` (${res.cvPercent.toFixed(1)}%)` : ''}</span>
                         </div>
                         <div className="flex justify-between text-xs text-gray-600">
                           <span>{ciLabel(res)}</span>
@@ -353,13 +353,13 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                         {res.error ? '—' : res.medianRaw.toFixed(4)}
                       </td>
                       <td className="text-right py-2 px-3 font-mono text-gray-300">
-                        {res.error ? '—' : res.stdDev.toFixed(4)}
+                        {res.error || !Number.isFinite(res.stdDev) ? '—' : res.stdDev.toFixed(4)}
                       </td>
                       <td className="text-right py-2 px-3 font-mono text-gray-300">
                         {res.error || !Number.isFinite(res.cvPercent) ? '—' : `${res.cvPercent.toFixed(1)}%`}
                       </td>
                       <td className="text-right py-2 px-3 font-mono text-gray-300" title={ciLabel(res)}>
-                        {res.error ? '—' : `${res.medianCi95[0].toFixed(4)} – ${res.medianCi95[1].toFixed(4)}${res.legacyStats ? ' *' : ''}`}
+                        {res.error ? '—' : `${res.medianCi95[0].toFixed(4)} – ${res.medianCi95[1].toFixed(4)}${res.legacyStats ? ' *' : !res.medianCiValid ? ' (range)' : ''}`}
                       </td>
                       <td className="text-right py-2 px-3 text-gray-400">
                         {res.runCount}
@@ -373,7 +373,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
               </table>
             </div>
             {results.some(r => r.legacyStats) && (
-              <p className="text-xs text-gray-500 mt-3">* Saved by NeuralGauge 1.0.x: this interval is for the mean, not the median, and its spread figure was a standard deviation.</p>
+              <p className="text-xs text-gray-500 mt-3">* Saved by NeuralGauge 1.0.x: this interval is for the mean, not the median, and its spread figure was a standard deviation (for VRAM, of durations in seconds, so it isn't shown).</p>
             )}
           </div>
         </div>
@@ -392,7 +392,8 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
                     score: r.score,
                     // The engine maps the median's interval through the same calibration as the
                     // score, so the whiskers are the score's own 95% interval.
-                    ci: r.scoreCi95 ? [r.score - r.scoreCi95[0], r.scoreCi95[1] - r.score] : undefined,
+                    // Only a valid median interval becomes 95% whiskers; a min–max range from too few runs doesn't.
+                    ci: r.medianCiValid && r.scoreCi95 ? [r.score - r.scoreCi95[0], r.scoreCi95[1] - r.score] : undefined,
                   }))}>
                     <CartesianGrid stroke="#333" strokeDasharray="3 3" />
                     <XAxis dataKey="name" tick={{fill: '#999', fontSize: 11}} axisLine={false} tickLine={false} />
