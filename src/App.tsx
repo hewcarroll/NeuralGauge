@@ -394,7 +394,7 @@ const App: React.FC = () => {
 
       <footer className="py-8 text-center text-gray-600 text-sm border-t border-white/5 mt-auto">
         <p>NeuralGauge runs native hardware benchmarks on your system.</p>
-        <p className="mt-2 text-xs opacity-50">Open source &mdash; <a href="https://www.saelix.org/neuralgauge" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-400">saelix.org/neuralgauge</a></p>
+        <p className="mt-2 text-xs opacity-50">Open source &mdash; <a href="https://hewcarroll.com/neuralgauge" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-400">hewcarroll.com/neuralgauge</a></p>
       </footer>
 
     </div>

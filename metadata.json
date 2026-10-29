@@ -1,5 +1,5 @@
 {
   "name": "NeuralGauge",
-  "description": "A desktop benchmarking suite that evaluates your hardware's capability for AI workloads using native Rust benchmarks, with Gemini-powered analysis.",
-  "homepage": "https://www.saelix.org/neuralgauge"
+  "description": "A desktop benchmarking suite that evaluates your hardware's capability for AI workloads using native Rust benchmarks, with optional plain-language analysis from the AI provider you choose.",
+  "homepage": "https://hewcarroll.com/neuralgauge"
 }

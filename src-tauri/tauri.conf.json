@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/nicedoc/schemas/main/tauri/v2/tauri.conf.json",
   "productName": "NeuralGauge",
   "version": "1.0.0",
-  "identifier": "com.saelix.neuralgauge",
+  "identifier": "com.hewcarroll.neuralgauge",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:3000",
@@ -34,6 +34,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "homepage": "https://www.saelix.org/neuralgauge"
+    "homepage": "https://hewcarroll.com/neuralgauge"
   }
 }

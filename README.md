@@ -6,7 +6,7 @@
 
 NeuralGauge measures the throughput and latency that matter for running models locally — FP32/FP16/INT32 compute, memory bandwidth, and access latency — and presents them as raw, comparable numbers plus an optional 0–10000 score. It runs natively (Tauri + Rust), not in a browser sandbox.
 
-A [Saelix](https://www.saelix.org) project · home: <https://www.saelix.org/neuralgauge>
+Home: <https://hewcarroll.com/neuralgauge>
 
 ## Features
 

@@ -44,7 +44,7 @@ on all three platforms.
 
 ## Phase 4 — Optional, post-v1
 - [ ] Tauri auto-updater (free, minisign-based; separate from code signing).
-- [ ] `saelix.org/neuralgauge` landing page with download buttons → Releases.
+- [ ] Download buttons on `hewcarroll.com/neuralgauge` → Releases.
 - [ ] Real NPU benchmark (`ort` / ONNX Runtime + DirectML / CoreML) — currently an
       honest stub.
 - [ ] A real ML-inference benchmark (tokens/sec on a tiny model) to back the
