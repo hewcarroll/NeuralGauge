@@ -12,6 +12,7 @@ import SessionHistory from './components/SessionHistory';
 import AISettingsModal from './components/AISettingsModal';
 import { Activity, Terminal, Settings, Cpu } from 'lucide-react';
 import { upgradeSession } from './services/sessions';
+import { STORAGE_KEYS, migrateLegacyStorage } from './services/storageKeys';
 
 enum AppState {
   IDLE,
@@ -20,10 +21,10 @@ enum AppState {
   RESULTS
 }
 
-const CONFIG_STORAGE_KEY = 'neuralgaugeConfig';
-const PRESETS_STORAGE_KEY = 'neuralgaugePresets';
-const SESSIONS_STORAGE_KEY = 'neuralgaugeSessions';
-const AI_PROVIDER_STORAGE_KEY = 'neuralgaugeAIProvider';
+const CONFIG_STORAGE_KEY = STORAGE_KEYS.config;
+const PRESETS_STORAGE_KEY = STORAGE_KEYS.presets;
+const SESSIONS_STORAGE_KEY = STORAGE_KEYS.sessions;
+const AI_PROVIDER_STORAGE_KEY = STORAGE_KEYS.aiProvider;
 
 const DEFAULT_AI_CONFIG: AIProviderConfig = {
   provider: AIProviderType.NONE,
@@ -51,6 +52,7 @@ const App: React.FC = () => {
 
   // Load config, presets & sessions from local storage on mount
   useEffect(() => {
+    migrateLegacyStorage();
     const savedConfig = localStorage.getItem(CONFIG_STORAGE_KEY);
     if (savedConfig) {
       try {
@@ -215,7 +217,7 @@ const App: React.FC = () => {
              <div className="w-8 h-8 bg-gradient-to-tr from-primary to-accent rounded flex items-center justify-center">
                 <Activity className="text-black w-5 h-5" />
              </div>
-             <span className="font-bold text-xl tracking-tight text-white">Neural<span className="text-primary">Gauge</span></span>
+             <span className="font-bold text-xl tracking-tight text-white">CH-<span className="text-primary">PIB</span></span>
           </div>
           <div className="flex items-center gap-4 text-xs font-mono text-gray-500">
             <button
@@ -394,8 +396,8 @@ const App: React.FC = () => {
       />
 
       <footer className="py-8 text-center text-gray-600 text-sm border-t border-white/5 mt-auto">
-        <p>NeuralGauge runs native hardware benchmarks on your system.</p>
-        <p className="mt-2 text-xs opacity-50">Open source &mdash; <a href="https://hewcarroll.com/neuralgauge" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-400">hewcarroll.com/neuralgauge</a></p>
+        <p>CH-PIB runs native hardware benchmarks on your system.</p>
+        <p className="mt-2 text-xs opacity-50">Open source &mdash; <a href="https://hewcarroll.com/ch-pib" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-400">hewcarroll.com/ch-pib</a></p>
       </footer>
 
     </div>

@@ -35,7 +35,7 @@ export interface BenchmarkResult {
   medianCiValid: boolean;
   /** The score at each end of medianCi95, on the score's own scale. */
   scoreCi95: [number, number] | null;
-  /** Saved by NeuralGauge 1.0.x on rust-hwbench 0.1: its interval was for the mean
+  /** Saved by 1.0.x (then named NeuralGauge) on rust-hwbench 0.1: its interval was for the mean
    *  and its "variance" was a standard deviation. Shown, but labeled as such. */
   legacyStats?: boolean;
   error?: string;

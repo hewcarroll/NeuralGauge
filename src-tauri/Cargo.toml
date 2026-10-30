@@ -1,12 +1,12 @@
 [package]
-name = "neuralgauge"
+name = "ch-pib"
 version = "1.0.0"
 description = "Native hardware benchmark for AI workloads"
 authors = []
 edition = "2024"
 
 [lib]
-name = "neuralgauge_lib"
+name = "ch_pib_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
@@ -21,7 +21,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 
 # The benchmark engine — CPU/GPU/RAM/VRAM/NPU measurement + system detection —
-# lives in this crate. NeuralGauge is the Tauri UI + opt-in scoring shell on top
+# lives in this crate. CH-PIB is the Tauri UI + opt-in scoring shell on top
 # of it (see src/lib.rs). Engine deps (wgpu, sysinfo, rayon, bytemuck, pollster)
 # now come transitively from rust-hwbench instead of being duplicated here.
 rust-hwbench = { path = "../../rust-hwbench" }

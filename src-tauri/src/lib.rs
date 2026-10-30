@@ -1,10 +1,10 @@
-//! NeuralGauge's Tauri command layer.
+//! CH-PIB's Tauri command layer.
 //!
 //! The benchmark engine (CPU/GPU/RAM/VRAM/NPU measurement + system detection)
 //! lives in the `rust-hwbench` crate. This file is the thin desktop shell on top:
 //! it exposes the engine to the UI as Tauri commands and applies the opt-in,
 //! calibrated 0–10000 `score` (rust-hwbench returns raw measurements with
-//! `score: None`; the opinionated score is NeuralGauge's layer).
+//! `score: None`; the opinionated score is CH-PIB's layer).
 use rust_hwbench::{
     apply_score, benchmarks, BenchmarkResultPayload, CpuConfig, GpuConfig, NpuConfig, RamConfig,
     SystemInfo, VramConfig,

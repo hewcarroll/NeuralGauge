@@ -1,6 +1,6 @@
-# NeuralGauge Roadmap
+# CH-PIB Roadmap
 
-NeuralGauge is a **free, open-source** desktop hardware benchmark. There is no
+CH-PIB (formerly NeuralGauge) is a **free, open-source** desktop hardware benchmark. There is no
 paid tier and no monetization — the goal is a polished, downloadable v1.
 
 **Definition of done (v1):** documented installers for Linux / Windows / macOS on
@@ -44,7 +44,7 @@ on all three platforms.
 
 ## Phase 4 — Optional, post-v1
 - [ ] Tauri auto-updater (free, minisign-based; separate from code signing).
-- [ ] Download buttons on `hewcarroll.com/neuralgauge` → Releases.
+- [ ] Download buttons on `hewcarroll.com/ch-pib` → Releases.
 - [ ] Real NPU benchmark (`ort` / ONNX Runtime + DirectML / CoreML) — currently an
       honest stub.
 - [ ] A real ML-inference benchmark (tokens/sec on a tiny model) to back the
@@ -57,4 +57,4 @@ on all three platforms.
 days of work, plus cross-platform access. Everything in Phase 4 is genuinely optional.
 
 The benchmark engine lives in [`rust-hwbench`](https://github.com/hewcarroll/rust-hwbench);
-NeuralGauge is the UI + scoring shell on top of it.
+CH-PIB is the UI + scoring shell on top of it.

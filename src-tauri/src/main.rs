@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    neuralgauge_lib::run()
+    ch_pib_lib::run()
 }

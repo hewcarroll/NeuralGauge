@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BenchmarkResult, AnalysisResult, ComponentType, SavedSession } from '../types';
 import { COMPONENT_ICONS, GLOBAL_AVERAGES } from '../constants';
+import { STORAGE_KEYS } from '../services/storageKeys';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, CartesianGrid, Legend, ErrorBar } from 'recharts';
 import ReactMarkdown from 'react-markdown';
 import { RefreshCw, Cpu, Brain, Download, AlertTriangle, Save, Layers, BrainCircuit, Timer, Check, X, ArrowUpRight, ArrowDownRight, Scale, Zap } from 'lucide-react';
@@ -28,7 +29,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
 
   // Load sessions for comparison dropdown
   useEffect(() => {
-    const sessions = localStorage.getItem('neuralgaugeSessions');
+    const sessions = localStorage.getItem(STORAGE_KEYS.sessions);
     if (sessions) {
       try {
         setSavedSessions(JSON.parse(sessions));
@@ -134,7 +135,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `neural-gauge-results-${Date.now()}.json`;
+    link.download = `ch-pib-results-${Date.now()}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -373,7 +374,7 @@ const ResultsView: React.FC<ResultsViewProps> = ({ results, analysis, onReset, l
               </table>
             </div>
             {results.some(r => r.legacyStats) && (
-              <p className="text-xs text-gray-500 mt-3">* Saved by NeuralGauge 1.0.x: this interval is for the mean, not the median, and its spread figure was a standard deviation (for VRAM, of durations in seconds, so it isn't shown).</p>
+              <p className="text-xs text-gray-500 mt-3">* Saved by version 1.0.x (then named NeuralGauge): this interval is for the mean, not the median, and its spread figure was a standard deviation (for VRAM, of durations in seconds, so it isn't shown).</p>
             )}
           </div>
         </div>

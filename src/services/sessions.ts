@@ -1,7 +1,7 @@
 import { BenchmarkResult, SavedSession } from '../types';
 
 /**
- * Sessions saved by NeuralGauge 1.0.x hold rust-hwbench 0.1 statistics: `variance` was
+ * Sessions saved by 1.0.x (then named NeuralGauge) hold rust-hwbench 0.1 statistics: `variance` was
  * really a standard deviation and `confidenceInterval` was the interval of the mean, not
  * the median. Map them onto the current fields and mark them, so the UI can label them.
  */

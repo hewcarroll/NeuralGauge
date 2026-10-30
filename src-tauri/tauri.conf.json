@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedoc/schemas/main/tauri/v2/tauri.conf.json",
-  "productName": "NeuralGauge",
+  "productName": "CH-PIB",
   "version": "1.0.0",
-  "identifier": "com.hewcarroll.neuralgauge",
+  "identifier": "com.hewcarroll.chpib",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:3000",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "NeuralGauge",
+        "title": "CH-PIB",
         "width": 1200,
         "height": 800,
         "resizable": true,
@@ -34,6 +34,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "homepage": "https://hewcarroll.com/neuralgauge"
+    "homepage": "https://hewcarroll.com/ch-pib"
   }
 }

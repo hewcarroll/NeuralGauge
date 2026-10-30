@@ -1,12 +1,14 @@
 <!-- TODO: capture docs/screenshot.png from the running app and embed it here -->
 
-# NeuralGauge
+# CH-PIB
+
+*Computer Hardware Performance and Integrity Battery*, said "see-aitch pib". Formerly named NeuralGauge.
 
 **A native desktop hardware benchmark for AI workloads** — CPU, GPU, RAM, VRAM, and NPU, with an optional AI-written read on your results. Free and open source.
 
-NeuralGauge measures the throughput and latency that matter for running models locally — FP32/FP16/INT32 compute, memory bandwidth, and access latency — and presents them as raw, comparable numbers plus an optional 0–10000 score. It runs natively (Tauri + Rust), not in a browser sandbox.
+CH-PIB measures the throughput and latency that matter for running models locally — FP32/FP16/INT32 compute, memory bandwidth, and access latency — and presents them as raw, comparable numbers plus an optional 0–10000 score. It runs natively (Tauri + Rust), not in a browser sandbox.
 
-Home: <https://hewcarroll.com/neuralgauge>
+Home: <https://hewcarroll.com/ch-pib>
 
 ## Features
 
@@ -30,11 +32,11 @@ The AI write-up is entirely optional and uses **your own API key**, entered in t
 - Anthropic
 - A local model via an OpenAI-compatible server (e.g. Ollama at `http://localhost:11434/v1`)
 
-Your results are sent only to the provider you choose. NeuralGauge has no backend and collects nothing; skip the AI step entirely and the benchmarks run fully offline.
+Your results are sent only to the provider you choose. CH-PIB has no backend and collects nothing; skip the AI step entirely and the benchmarks run fully offline.
 
 ## Install
 
-Pre-built installers will be published on the [Releases](https://github.com/hewcarroll/NeuralGauge/releases) page once the first release is cut (see [ROADMAP.md](ROADMAP.md)). Until then, build from source.
+Pre-built installers will be published on the [Releases](https://github.com/hewcarroll/ch-pib/releases) page once the first release is cut (see [ROADMAP.md](ROADMAP.md)). Until then, build from source.
 
 ## Build from source
 
@@ -43,9 +45,9 @@ Pre-built installers will be published on the [Releases](https://github.com/hewc
 The benchmark engine, [`rust-hwbench`](https://github.com/hewcarroll/rust-hwbench), is consumed via a local path dependency, so clone both repos **side by side**:
 
 ```bash
-git clone https://github.com/hewcarroll/NeuralGauge.git
-git clone https://github.com/hewcarroll/rust-hwbench.git   # sibling of NeuralGauge
-cd NeuralGauge
+git clone https://github.com/hewcarroll/ch-pib.git
+git clone https://github.com/hewcarroll/rust-hwbench.git   # sibling of ch-pib
+cd ch-pib
 npm install
 npm run tauri:dev      # run in development
 npm run tauri:build    # produce a native installer under src-tauri/target/release/bundle/
@@ -53,7 +55,7 @@ npm run tauri:build    # produce a native installer under src-tauri/target/relea
 
 ## Architecture
 
-The benchmark **engine** lives in a separate crate, [`rust-hwbench`](https://github.com/hewcarroll/rust-hwbench) — raw measurements with opt-in scoring, usable as a library or CLI on its own. NeuralGauge is the desktop **UI + scoring shell** on top of it. Keeping the engine standalone means the measurement code is tested and reusable independently of the app.
+The benchmark **engine** lives in a separate crate, [`rust-hwbench`](https://github.com/hewcarroll/rust-hwbench) — raw measurements with opt-in scoring, usable as a library or CLI on its own. CH-PIB is the desktop **UI + scoring shell** on top of it. Keeping the engine standalone means the measurement code is tested and reusable independently of the app.
 
 ## License
 

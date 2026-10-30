@@ -31,10 +31,10 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - name: Checkout NeuralGauge
+      - name: Checkout CH-PIB
         uses: actions/checkout@v4
 
-      # NeuralGauge consumes the rust-hwbench engine via a local path dependency
+      # CH-PIB consumes the rust-hwbench engine via a local path dependency
       # (src-tauri/Cargo.toml -> `../../rust-hwbench`). Clone it as a sibling of the
       # workspace so the path resolves identically to local dev — no manifest edits,
       # and `cargo build` stays the single source of truth for the engine.
@@ -79,7 +79,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "NeuralGauge ${{ github.ref_name }}"
+          releaseName: "CH-PIB ${{ github.ref_name }}"
           releaseBody: |
             A free, native hardware benchmark for AI workloads (CPU / GPU / RAM / VRAM / NPU).
 
